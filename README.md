@@ -1,2 +1,1 @@
-# CADynM
-Computer Aided Dynamics for MATLAB - Multibody System Dynamics Equations of Motion
+This is a reimplementation of github.com/jgeisler0303/CADyn in MATLAB. The work has just started and is in a POC stage.
