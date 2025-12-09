@@ -4,9 +4,12 @@ classdef MultiBodySystem  < handle
         gravity (3,1) sym = 0
         bodies struct = struct()  % Stores bodies by name
         time (1,1) sym = sym('time', 'real')
-        dof struct = struct()
+        dof struct = struct()                   % Degrees of freedom
         dof_idx struct = struct()        
         q (:,1) sym = []
+        doc struct = struct()                   % Degrees of constraint
+        doc_idx struct = struct()               % Constraintforces are calculated in the direction of these coordinates
+        z (:,1) sym = []                        % Constraint coordinates
         inputs struct = struct()
         outputs struct = struct()
         params struct = struct()
@@ -51,6 +54,28 @@ classdef MultiBodySystem  < handle
             obj.dof.([coordName '_dd']) = diff(symFun, obj.time, 2);
             obj.q(end+1,1) = symFun;
             obj.dof_idx.(coordName) = length(obj.q);
+        end
+
+        % Add a generalized constraint coordinate by name
+        function addConstraintCoordinate(obj, coordName)
+            arguments
+                obj
+                coordName (1,:) char
+            end
+    
+            % Check for duplicate name
+            checkName(obj, coordName)
+    
+            % Define symbolic variable dynamically
+            % symFun = symfun(str2sym([coordName '(time)']), obj.time);
+            symFun = str2sym([coordName '(time)']);
+    
+            % Store it
+            obj.doc.(coordName) = symFun;
+            obj.doc.([coordName '_d']) = diff(symFun, obj.time);
+            obj.doc.([coordName '_dd']) = diff(symFun, obj.time, 2);
+            obj.z(end+1,1) = symFun;
+            obj.doc_idx.(coordName) = length(obj.z);
         end
 
         % Add a parameter by name
@@ -110,7 +135,7 @@ classdef MultiBodySystem  < handle
                 obj
                 auxName (1,:) char
             end
-            
+
             dx = diff(obj.aux_state.(auxName), obj.time);
         end
 
@@ -195,13 +220,41 @@ classdef MultiBodySystem  < handle
             
             eom = simplify(eom);
             if replace_diff
-                obj.qdd_ = sym('qdd_', [length(obj.q), 1]);
-                obj.qd_ = sym('qd_', [length(obj.q), 1]);
-                obj.q_ = sym('q_', [length(obj.q), 1]);
+                % TODO: do this in model finalization step
+                if isempty(obj.qdd_)
+                    obj.qdd_ = sym('qdd_', [length(obj.q), 1]);
+                    obj.qd_ = sym('qd_', [length(obj.q), 1]);
+                    obj.q_ = sym('q_', [length(obj.q), 1]);
+                end
 
                 eom = subs(eom, diff(obj.q, obj.time, 2), obj.qdd_);
                 eom = subs(eom, diff(obj.q, obj.time), obj.qd_);
                 eom = subs(eom, obj.q, obj.q_);
+            end
+        end
+
+        function Fz = getConstraintForces(obj, replace_diff)
+            if ~exist('replace_diff', 'var')
+                replace_diff = true;
+            end
+
+            Fz = sym(zeros(length(obj.z), 1));
+            for i= 1:length(obj.children)
+                Fz = Fz + obj.children(i).collectConstrForces;
+            end
+            
+            Fz = simplify(Fz);
+            if replace_diff
+                % TODO: do this in model finalization step
+                if isempty(obj.qdd_)
+                    obj.qdd_ = sym('qdd_', [length(obj.q), 1]);
+                    obj.qd_ = sym('qd_', [length(obj.q), 1]);
+                    obj.q_ = sym('q_', [length(obj.q), 1]);
+                end
+
+                Fz = subs(Fz, diff(obj.q, obj.time, 2), obj.qdd_);
+                Fz = subs(Fz, diff(obj.q, obj.time), obj.qd_);
+                Fz = subs(Fz, obj.q, obj.q_);
             end
         end
 
@@ -284,6 +337,13 @@ classdef MultiBodySystem  < handle
                     name_in_use= true;
                 else
                     error("Coordinate name '%s' already exists in the system.", name);
+                end
+            end
+            if isfield(obj.doc, name)
+                if nargout>0
+                    name_in_use= true;
+                else
+                    error("Constraint coordinate name '%s' already exists in the system.", name);
                 end
             end
             if isfield(obj.params, name)
