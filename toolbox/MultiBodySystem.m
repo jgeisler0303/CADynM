@@ -15,6 +15,9 @@ classdef MultiBodySystem  < handle
         q_ (:,1) sym = []
         qd_ (:,1) sym = []
         qdd_ (:,1) sym = []
+
+        aux_state struct = struct()             % auxiliary state names
+        aux_impl_ode (:,1) sym = []             % auxiliary implicit first order ode        
     end
 
     properties (Access = private)
@@ -82,6 +85,38 @@ classdef MultiBodySystem  < handle
     
             % Store it
             obj.inputs.(inName) = symVar;
+        end
+
+        % Add auxilliary state by name
+        function addAuxState(obj, auxName)
+            arguments
+                obj
+                auxName (1,:) char
+            end
+    
+            % Check for duplicate name
+            checkName(obj, auxName)
+    
+            % Define symbolic variable dynamically
+            symVar = sym(auxName, 'real');
+    
+            % Store it
+            obj.aux_state.(auxName) = symVar;
+        end
+
+        % Get the time derivative of auxilliary state
+        function dx = getAuxStateD(obj, auxName)
+            arguments
+                obj
+                auxName (1,:) char
+            end
+            
+            dx = diff(obj.aux_state.(auxName), obj.time);
+        end
+
+        % Add auxilliary state by name
+        function addAuxImplODE(obj, ode)
+            obj.aux_impl_ode(end+1) = ode;
         end
 
         % Add a body with a unique name
@@ -204,7 +239,7 @@ classdef MultiBodySystem  < handle
             eom = subs(eom, diff(obj.q, obj.time), x2);
             eom = subs(eom, obj.q, x1);
 
-            f_impl = [diff(x1, obj.time) == x2 ; eom];
+            f_impl = [diff(x1, obj.time) == x2 ; eom; obj.aux_impl_ode];
 
             if ~exist('filename', 'var')
                 fun = daeFunction(f_impl, x, in, struct2array(obj.params));
@@ -263,6 +298,13 @@ classdef MultiBodySystem  < handle
                     name_in_use= true;
                 else
                     error("Input name '%s' already exists in the system.", name);
+                end
+            end
+            if isfield(obj.aux_state, name)
+                if nargout>0
+                    name_in_use= true;
+                else
+                    error("Auxilliary state name '%s' already exists in the system.", name);
                 end
             end
         end
