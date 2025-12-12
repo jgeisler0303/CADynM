@@ -1,7 +1,5 @@
-* test auxilliary differential equations
-* add external, state and input dependent forces/inputs to auxilliary differential equations
 * add joints on elastic bodies
-* add template generation
-* add linearization
-* add some locking for data input, so that any further calculations on the finished system can be cashed
+* test auxilliary differential equations
+* optionally specify mass and inertia upon creation of body
+* separate optimized constants and move them to pre_calc
 * add alternative generation of recursive calculations

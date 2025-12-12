@@ -1,13 +1,8 @@
 % function testConstraintRotation
 % Simple test to verify constraint forces
-testSystem= MultiBodySystem('rot_constr_test');
-testSystem.addGeneralizedCoordinate('phi')
-testSystem.addConstraintCoordinate('Fc_x')
-testSystem.addConstraintCoordinate('Fc_y')
-testSystem.addInput('Fx')
-testSystem.addParameter('m');
-testSystem.addParameter('l');
-testSystem.addParameter('g');
+testSystem= MultiBodySystem('rot_constr_test', 'phi', 'Fx');
+testSystem.addConstraintCoordinate({'Fc_x' 'Fc_y'})
+testSystem.addParameter({'m' 'l' 'g'});
 testSystem.gravity(2) = -testSystem.params.g;
 
 rotatingBody= RigidBody('rotor', 'Rotating body with off-center mass');
@@ -21,6 +16,6 @@ testSystem.addChild(rotatingBody)
 
 testSystem.applyForce([testSystem.inputs.Fx; 0; 0], rotatingBody)
 
-testSystem.prepareKinematics()
+testSystem.completeSetup()
 % testSystem.eomDae('testConstraintRotation_DAE.m')
 Fz = testSystem.getConstraintForces()

@@ -1,0 +1,64 @@
+{{ fprintf("%% Multibody system: %s\n", temp_data.Name); }}
+
+nq = {{ fprintf("%d", temp_data.getNumDOF); }};
+nx = {{ fprintf("%d", temp_data.getNumStates); }};
+nu = {{ fprintf("%d", temp_data.getNumIn); }};
+ny = {{ fprintf("%d", temp_data.getNumOut); }};
+
+{{ 
+for i = 1:temp_data.getNumDOF
+    fprintf("%s_idx= %d;\n", temp_data.getQName(i), i);
+end
+}}
+{{ 
+for i = 1:temp_data.getNumDOF
+    fprintf("%s_idx= %d;\n", temp_data.getQdName(i), i);
+end
+}}
+{{ 
+for i = 1:temp_data.getNumIn
+    fprintf("in_%s_idx= %d;\n", temp_data.getInName(i), i);
+end
+}}
+{{ 
+for i = 1:temp_data.getNumOut
+    fprintf("out_%s_idx= %d;\n", temp_data.getOutName(i), i);
+end
+}}
+dof_names= {
+{{ 
+for i = 1:temp_data.getNumDOF
+    fprintf("    '%s'\n", temp_data.getQName(i));
+end
+}}};
+
+dof_d_names= {
+{{ 
+for i = 1:temp_data.getNumDOF
+    fprintf("    '%s'\n", temp_data.getQdName(i));
+end
+}}};
+
+state_names= {
+{{ 
+for i = 1:temp_data.getNumDOF
+    fprintf("    '%s'\n", temp_data.getQName(i));
+end
+for i = 1:temp_data.getNumDOF
+    fprintf("    '%s'\n", temp_data.getQdName(i));
+end
+}}};
+
+input_names= {
+{{ 
+for i = 1:temp_data.getNumIn
+    fprintf("    '%s'\n", temp_data.getInName(i));
+end
+}}};
+
+output_names= {
+{{ 
+for i = 1:temp_data.getNumOut
+    fprintf("    '%s'\n", temp_data.getOutName(i));
+end
+}}};

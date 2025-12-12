@@ -1,0 +1,8 @@
+parameter_names= {
+{{
+    % temp_data is expected to be a MultiBodySystem
+    pn= fieldnames(temp_data.params);
+    for i = 1:length(pn)
+        fprintf("    '%s'\n", pn{i});
+    end
+}}};
