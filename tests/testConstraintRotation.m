@@ -18,4 +18,4 @@ testSystem.applyForce([testSystem.inputs.Fx; 0; 0], rotatingBody)
 
 testSystem.completeSetup()
 % testSystem.eomDae('testConstraintRotation_DAE.m')
-Fz = testSystem.getConstraintForces()
+Fz = testSystem.getConstraintForce({'Fc_x' 'Fc_y'})

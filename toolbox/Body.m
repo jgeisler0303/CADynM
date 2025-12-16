@@ -95,6 +95,24 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             obj.T = obj.T * R;
         end
 
+        % calculate acceleration of local point in global coordinates
+        % TODO: extend to any reference frame
+        function abs_accel = getA0(obj, r_rel, v_rel, a_rel)
+            arguments
+                obj 
+                r_rel (3, 1) {mustBeNumericOrSym} 
+                v_rel (3, 1) {mustBeNumericOrSym} 
+                a_rel (3, 1) {mustBeNumericOrSym} 
+            end
+            obj.system.obj.checkSetupCompleted()
+
+            r_abs = obj.T0(1:3, 1:3) * r_rel;
+            v_abs = obj.T0(1:3, 1:3) * v_rel;
+            a_abs = obj.T0(1:3, 1:3) * a_rel;
+        
+            abs_accel = simplify(obj.a0 + crossmat(obj.alpha0)*r_abs + crossmat(obj.omega0)*(crossmat(obj.omega0)*r_abs) + 2.0*crossmat(obj.omega0)*v_abs + a_abs);
+        end
+
         % calculate kinematics
         function prepareKinematicsBase(obj)
             obj.v0= diff(obj.T0(1:3, 4), obj.system.time);
@@ -188,6 +206,12 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
 
             T = sym(eye(4));
             T(1:3,1:3) = R;
+        end
+        
+        function mustBeNumericOrSym(val)
+            if ~(isnumeric(val) || isa(val,'sym'))
+                error('Value must be numeric or symbolic.');
+            end
         end
     end
 end

@@ -1,7 +1,7 @@
 classdef SID  < handle
     properties
         comment (1,:) char = ''
-        mass (1,1) double = 0
+        mass (1,1) = 0
         nelastq (1,1) double = 0
         ielastq (1,:) cell = {}
         frame (1,:) ElasticFrame = ElasticFrame.empty
@@ -19,29 +19,43 @@ classdef SID  < handle
 
     methods
         % Constructor
-        function obj = SID(nedof, n_frames)
+        function obj = SID(nedof, n_frames, name, system)
+            arguments
+                nedof
+                n_frames (1,1) double = 0;
+                name = ''
+                system = []
+            end
             if isstruct(nedof)
                 sid_struct= nedof;
+                % Specify relative tolerance for which parameters shall be
+                % omitted.
+                % If non-zero, values are changed to parameters.
+                rel_tol = n_frames;
 
                 obj.nelastq = sid_struct.refmod.nelastq;
                 obj.comment = sid_struct.comment;
                 obj.ielastq = sid_struct.refmod.ielastq;
-                obj.mass= sid_struct.refmod.mass;
+                if rel_tol~=0
+                    obj.mass= system.addParameter([name '_mass']);
+                else
+                    obj.mass= sid_struct.refmod.mass;
+                end
     
                 for i = 1:length(sid_struct.frame)
-                    obj.frame(i) = ElasticFrame(sid_struct.frame(i));
+                    obj.frame(i) = ElasticFrame(sid_struct.frame(i), sprintf('%s_frame_%d', name, i), rel_tol, system);
                 end
                 
-                obj.md = ElasticTaylor(sid_struct.md, 0);
-                obj.I = ElasticTaylor(sid_struct.I, 0); % 2nd order element currently not supported
-                obj.Ct = ElasticTaylor(sid_struct.Ct, 0);
-                obj.Cr = ElasticTaylor(sid_struct.Cr, 0);
-                obj.Me = ElasticTaylor(sid_struct.Me, 0);
-                obj.Gr = ElasticTaylor(sid_struct.Gr, obj.nelastq);
-                obj.Ge = ElasticTaylor(sid_struct.Ge, obj.nelastq);
-                obj.Oe = ElasticTaylor(sid_struct.Oe, 0);
-                obj.Ke = ElasticTaylor(sid_struct.Ke, 0);
-                obj.De = ElasticTaylor(sid_struct.De, 0);
+                obj.md = ElasticTaylor(sid_struct.md, 0, rel_tol, [name '_md'], system);
+                obj.I = ElasticTaylor(sid_struct.I, 0, rel_tol, [name '_I'], system); % 2nd order element currently not supported
+                obj.Ct = ElasticTaylor(sid_struct.Ct, 0, rel_tol, [name '_Ct'], system);
+                obj.Cr = ElasticTaylor(sid_struct.Cr, 0, rel_tol, [name '_Cr'], system);
+                obj.Me = ElasticTaylor(sid_struct.Me, 0, rel_tol, [name '_Me'], system);
+                obj.Gr = ElasticTaylor(sid_struct.Gr, obj.nelastq, rel_tol, [name '_Gr'], system);
+                obj.Ge = ElasticTaylor(sid_struct.Ge, obj.nelastq, rel_tol, [name '_Ge'], system);
+                obj.Oe = ElasticTaylor(sid_struct.Oe, 0, rel_tol, [name '_Oe'], system);
+                obj.Ke = ElasticTaylor(sid_struct.Ke, 0, rel_tol, [name '_K'], system);
+                obj.De = ElasticTaylor(sid_struct.De, 0, rel_tol, [name '_D'], system);
             else
                 obj.nelastq = nedof;
                 for i = 1:nedof

@@ -11,17 +11,23 @@ classdef ElasticFrame  < handle
 
     methods
         % Constructor
-        function obj = ElasticFrame(nedof, name)
+        function obj = ElasticFrame(nedof, name, rel_tol, system)
+            arguments
+                nedof
+                name (1,:) char = ''
+                rel_tol (1,1) double = 0
+                system = []
+            end
             if isstruct(nedof)
                 frame_struct = nedof;
                 
                 obj.name = frame_struct.node;
                 obj.rframe = frame_struct.rframe;
-                obj.origin = ElasticTaylor(frame_struct.origin);
-                obj.ap = ElasticTaylor(frame_struct.AP);
-                obj.phi = ElasticTaylor(frame_struct.Phi);
-                obj.psi = ElasticTaylor(frame_struct.Psi);
-                obj.sigma = ElasticTaylor(frame_struct.sigma);                
+                obj.origin = ElasticTaylor(frame_struct.origin, 0, rel_tol, [name '_origin'], system);
+                obj.ap = ElasticTaylor(frame_struct.AP, 0, rel_tol, [name '_ap'], system);
+                obj.phi = ElasticTaylor(frame_struct.Phi, 0, rel_tol, [name '_phi'], system);
+                obj.psi = ElasticTaylor(frame_struct.Psi, 0, rel_tol, [name '_psi'], system);
+                obj.sigma = ElasticTaylor(frame_struct.sigma, 0, rel_tol, [name '_sigma'], system);                
             else
                 if exist('name', 'var')
                     obj.name = name;

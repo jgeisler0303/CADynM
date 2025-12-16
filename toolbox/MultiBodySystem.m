@@ -17,6 +17,7 @@ classdef MultiBodySystem  < handle
         outputs struct = struct()
 
         params struct = struct()
+        param_values struct = struct()
 
         children (1,:) Body = Body.empty
 
@@ -26,6 +27,7 @@ classdef MultiBodySystem  < handle
         setupCompleted = false                  % set to true once model is finished an no further data can be added
 
         eom (:,1) sym = []
+        Fz (:,1) sym = []                       % cash for calculated constraint forces
         M (:,:) sym = []
         C (:,:) sym = []
         K (:,:) sym = []
@@ -65,7 +67,7 @@ classdef MultiBodySystem  < handle
                 return
             end
 
-            obj.checkSetupCompleted();
+            obj.checkSetupNotCompleted();
             obj.checkName(coordName)
     
             % Define symbolic variable dynamically
@@ -87,7 +89,7 @@ classdef MultiBodySystem  < handle
                 coordName { MultiBodySystem.mustBeNonemptyCharOrCell }
             end
 
-            obj.checkSetupCompleted();
+            obj.checkSetupNotCompleted();
 
             if iscell(coordName)
                 for i = 1:length(coordName)
@@ -96,7 +98,7 @@ classdef MultiBodySystem  < handle
                 return
             end
     
-            obj.checkSetupCompleted();
+            obj.checkSetupNotCompleted();
             obj.checkName(coordName)
     
             % Define symbolic variable dynamically
@@ -112,7 +114,7 @@ classdef MultiBodySystem  < handle
         end
 
         % Add a parameter by name
-        function addParameter(obj, paramName, dims)
+        function p = addParameter(obj, paramName, dims)
             arguments
                 obj
                 paramName { MultiBodySystem.mustBeNonemptyCharOrCell }
@@ -122,13 +124,17 @@ classdef MultiBodySystem  < handle
                 if ~isempty(dims)
                     error('Non scalar Parameters cannot be created at once.')
                 end
+                p_ = [];
                 for i = 1:length(paramName)
-                    obj.addParameter(paramName{i})
+                    p_(end+1) = obj.addParameter(paramName{i});
                 end
+                if nargin>0
+                    p = p_;
+                end                
                 return
             end
     
-            obj.checkSetupCompleted();
+            obj.checkSetupNotCompleted();
             obj.checkName(paramName)
     
             % Define symbolic variable dynamically
@@ -140,6 +146,9 @@ classdef MultiBodySystem  < handle
     
             % Store it
             obj.params.(paramName) = symVar;
+            if nargin>0
+                p = symVar;
+            end
         end
 
         % Add input by name
@@ -156,7 +165,7 @@ classdef MultiBodySystem  < handle
                 return
             end
     
-            obj.checkSetupCompleted();
+            obj.checkSetupNotCompleted();
             obj.checkName(inName)
     
             % Define symbolic variable dynamically
@@ -174,7 +183,7 @@ classdef MultiBodySystem  < handle
                 expr (1,1) sym
             end
 
-            obj.checkSetupCompleted();
+            obj.checkSetupNotCompleted();
             obj.checkName(outName)
 
             obj.outputs.(outName) = expr;
@@ -188,7 +197,7 @@ classdef MultiBodySystem  < handle
                 depends sym
             end
     
-            obj.checkSetupCompleted();            
+            obj.checkSetupNotCompleted();            
             checkName(obj, extName)
     
             % Define symbolic variable dynamically
@@ -212,7 +221,7 @@ classdef MultiBodySystem  < handle
                 return
             end
     
-            obj.checkSetupCompleted();
+            obj.checkSetupNotCompleted();
             obj.checkName(auxName)
     
             % Define symbolic variable dynamically
@@ -224,7 +233,7 @@ classdef MultiBodySystem  < handle
 
         % Add auxilliary state by name
         function addAuxImplODE(obj, ode)
-            obj.checkSetupCompleted();
+            obj.checkSetupNotCompleted();
             obj.aux_impl_ode(end+1) = ode;
         end
 
@@ -235,7 +244,7 @@ classdef MultiBodySystem  < handle
                 body (1,1) Body
             end
     
-            obj.checkSetupCompleted();
+            obj.checkSetupNotCompleted();
             if isempty(body.Name)
                 name_in_use= true;
                 i= 1;
@@ -259,7 +268,7 @@ classdef MultiBodySystem  < handle
                 body (1,1) Body
             end
 
-            obj.checkSetupCompleted();
+            obj.checkSetupNotCompleted();
             obj.addBody(body);
             
             body.parent= obj;
@@ -268,7 +277,7 @@ classdef MultiBodySystem  < handle
         end
 
         function completeSetup(obj)
-            obj.checkSetupCompleted()
+            obj.checkSetupNotCompleted()
             obj.setupCompleted = true;
             
             obj.prepareKinematics();
@@ -512,6 +521,7 @@ classdef MultiBodySystem  < handle
         end
 
         function eom_ = getEOM(obj)
+            obj.checkSetupCompleted()
             if ~isempty(obj.eom)
                 eom_ = obj.eom;
                 return
@@ -525,13 +535,21 @@ classdef MultiBodySystem  < handle
             obj.eom = eom_;
         end
 
-        function Fz = getConstraintForces(obj)
-            Fz = sym(zeros(length(obj.z), 1));
-            for i= 1:length(obj.children)
-                Fz = Fz + obj.children(i).collectConstrForces;
+        function Fz_ = getConstraintForce(obj, name)
+            obj.checkSetupCompleted()
+            if ~isempty(obj.eom)
+                Fz_ = obj.Fz;
+            else
+                Fz_ = sym(zeros(length(obj.z), 1));
+                for i= 1:length(obj.children)
+                    Fz_ = Fz_ + obj.children(i).collectConstrForces;
+                end
+                
+                Fz_ = simplify(Fz_);
+                obj.Fz = Fz_;
             end
             
-            Fz = simplify(Fz);
+            Fz_ = Fz_(ismember(fieldnames(obj.doc_idx), name));
         end
 
         function fun = eomFunO2(obj, filename)
@@ -624,7 +642,7 @@ classdef MultiBodySystem  < handle
             ext_names = fieldnames(obj.externals);
             ext_d = cell(size(exts));
             for i = 1:length(exts)
-                [partial_names, deps] = obj.getExternalDerivs(i, naming);
+                partial_names = obj.getExternalDerivs(i, naming);
                 partial_syms = str2sym(partial_names);
                 deps = obj.external_deps.(ext_names{i});
                 for j = 1:length(deps)
@@ -653,6 +671,7 @@ classdef MultiBodySystem  < handle
         % different derivative vectors
         % Generalized mass matrix
         function M_ = getM(obj)
+            obj.checkSetupCompleted()
             if ~isempty(obj.M)
                 M_ = obj.M;
                 return
@@ -664,6 +683,7 @@ classdef MultiBodySystem  < handle
 
         % Generalized coriolis and damping matrix
         function C_ = getC(obj)
+            obj.checkSetupCompleted()
             if ~isempty(obj.C)
                 C_ = obj.C;
                 return
@@ -675,6 +695,7 @@ classdef MultiBodySystem  < handle
 
         % Generalized stiffness matrix
         function K_ = getK(obj)
+            obj.checkSetupCompleted()
             if ~isempty(obj.K)
                 K_ = obj.K;
                 return
@@ -686,6 +707,7 @@ classdef MultiBodySystem  < handle
 
         % Input Jacobian
         function B_ = getB(obj)
+            obj.checkSetupCompleted()
             if ~isempty(obj.B)
                 B_ = obj.B;
                 return
@@ -697,6 +719,7 @@ classdef MultiBodySystem  < handle
 
         % Output Jacobian
         function CD_ = getCD(obj)
+            obj.checkSetupCompleted()
             if ~isempty(obj.CD) || isempty(fieldnames(obj.outputs))
                 CD_ = obj.CD;
                 return
@@ -707,6 +730,7 @@ classdef MultiBodySystem  < handle
 
         % Output Jacobian wrt accelerations
         function F_ = getF(obj)
+            obj.checkSetupCompleted()
             if ~isempty(obj.F) || isempty(fieldnames(obj.outputs))
                 F_ = obj.F;
                 return
@@ -789,6 +813,12 @@ classdef MultiBodySystem  < handle
         end
 
         function checkSetupCompleted(obj)
+            if ~obj.setupCompleted
+                error('Model setup has not been completed. Please run completeSetup first.')
+            end
+        end
+
+        function checkSetupNotCompleted(obj)
             if obj.setupCompleted
                 error('Model setup has been completed. No further data can be added.')
 
