@@ -117,7 +117,7 @@ classdef ElasticTaylor  < handle
                 end
                 for i = 1:size(subsMat, 1)
                     pname = [name sprintf('_%d', subsMat(i, :))];
-                    p = system.addParameter(pname);
+                    p = system.addParameter(pname, [], M_(params_idx_lin(i)));
                     M(params_idx_lin(i)) = p;
                 end
             end

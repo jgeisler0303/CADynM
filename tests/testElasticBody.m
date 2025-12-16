@@ -9,14 +9,13 @@ elastic_body_system.addGeneralizedCoordinate('x_cart')
 elastic_body_system.addGeneralizedCoordinate('q_tow')
 
 elastic_body_system.addInput('F_cart')
-elastic_body_system.addParameter('g');
-elastic_body_system.addParameter('m_cart');
-elastic_body_system.addParameter('m_top');
-elastic_body_system.addParameter('I_top');
+elastic_body_system.addParameter('g', [], 9.81);
+elastic_body_system.addParameter('m_cart', [], 1000);
+elastic_body_system.addParameter('m_top', [], 1000);
+elastic_body_system.addParameter('I_top', [], 1000);
 elastic_body_system.gravity(3) = -elastic_body_system.params.g;
 
-cart= RigidBody('cart');
-cart.m= elastic_body_system.params.m_cart;
+cart= RigidBody('cart', [], elastic_body_system.params.m_cart);
 cart.translate([elastic_body_system.dof.x_cart 0 0]);
 elastic_body_system.addChild(cart)
 
@@ -25,8 +24,7 @@ tw_sid_ = SID(tw_sid, -1e-6, 'tow', elastic_body_system);
 tower= ElasticBody(elastic_body_system.dof.q_tow, tw_sid_, 'tower');
 cart.addChild(tower)
 
-top_mass= RigidBody('top_mass');
-top_mass.m= elastic_body_system.params.m_top;
+top_mass= RigidBody('top_mass', [], elastic_body_system.params.m_top);
 top_mass.I(2, 2)= elastic_body_system.params.I_top;
 tower.addChild(top_mass)
 
@@ -37,3 +35,25 @@ elastic_body_system.addOutput('x_tow', elastic_body_system.dof.q_tow)
 elastic_body_system.completeSetup;
 
 eom = elastic_body_system.getEOM
+
+
+%%
+elastic_body_system.eomDae('testElasticBody_DAE.m')
+
+t_end = 50;
+params = elastic_body_system.getParameterArray();
+f_min = 0.01;
+f_max = 5;
+excitation = @(t)chirp(t, f_min, t_end, f_max);
+F = @(t,Y,YP) testElasticBody_DAE(t, Y, YP, [excitation(t)], [], params);
+
+x0 = [0 0 0 0]';
+dx0= [x0(elastic_body_system.getNumDOF+1:end)' 0*x0(elastic_body_system.getNumDOF+1:end)']';
+
+opt= odeset(AbsTol=1e-5, RelTol=1e-3, MaxStep=0.01);
+
+sim_res= ode15i(F, [0,t_end], x0, dx0, opt);
+
+ff = interp1([sim_res.x(1) sim_res.x(end)], [f_min f_max], sim_res.x);
+plot(ff, sim_res.y(elastic_body_system.dof_idx.q_tow, :))
+grid on

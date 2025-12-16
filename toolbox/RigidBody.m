@@ -6,12 +6,20 @@ classdef RigidBody  < Body
 
     methods
         % Constructor
-        function obj = RigidBody(name, description)
+        function obj = RigidBody(name, description, mass, inertia)
             if nargin > 0
                 obj.Name = string(name);
             end
             if nargin > 1
-                obj.Description = string(description);
+                if ~isempty(description)
+                    obj.Description = string(description);
+                end
+            end
+            if nargin > 2
+                obj.m = mass;
+            end
+            if nargin > 3
+                obj.I = inertia;
             end
         end
 

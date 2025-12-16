@@ -13,18 +13,19 @@ classdef ElasticBody  < Body
     methods
         % Constructor
         function obj = ElasticBody(eDOF, sid, name, description)
-            if ~isempty(eDOF) && length(eDOF)~=sid.nelastq
-                error('Number of elastic DOF (%d) and DOF in SID (%d) must match.', length(eDOF), sid.nelastq)
-            end
-            for i = 1:length(eDOF)
-                obj.ElasticDOF(i) = eDOF;
-            end
-            
             if isstruct(sid)
                 obj.sid = SID(sid);
             else
                 obj.sid = sid;
             end
+
+            if ~isempty(eDOF) && length(eDOF)~=obj.sid.nelastq
+                error('Number of elastic DOF (%d) and DOF in SID (%d) must match.', length(eDOF), sid.nelastq)
+            end
+            for i = 1:length(eDOF)
+                obj.ElasticDOF(i) = eDOF;
+            end
+
             if nargin > 2
                 obj.Name = name;
             end

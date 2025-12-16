@@ -37,7 +37,7 @@ classdef SID  < handle
                 obj.comment = sid_struct.comment;
                 obj.ielastq = sid_struct.refmod.ielastq;
                 if rel_tol~=0
-                    obj.mass= system.addParameter([name '_mass']);
+                    obj.mass= system.addParameter([name '_mass'], [], sid_struct.refmod.mass);
                 else
                     obj.mass= sid_struct.refmod.mass;
                 end

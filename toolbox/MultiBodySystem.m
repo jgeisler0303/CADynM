@@ -114,19 +114,27 @@ classdef MultiBodySystem  < handle
         end
 
         % Add a parameter by name
-        function p = addParameter(obj, paramName, dims)
+        function p = addParameter(obj, paramName, dims, value)
             arguments
                 obj
                 paramName { MultiBodySystem.mustBeNonemptyCharOrCell }
-                dims (1,:) double = []
+                dims = []
+                value = []
             end
             if iscell(paramName)
-                if ~isempty(dims)
-                    error('Non scalar Parameters cannot be created at once.')
-                end
                 p_ = [];
                 for i = 1:length(paramName)
-                    p_(end+1) = obj.addParameter(paramName{i});
+                    if ~iscell(dims)                
+                        dims_ = dims;
+                    else
+                        dims_ = dims{i};
+                    end
+                    if ~iscell(value)                
+                        value_ = value;
+                    else
+                        value_ = value{i};
+                    end
+                    p_(end+1) = obj.addParameter(paramName{i}, dims_, value_);
                 end
                 if nargin>0
                     p = p_;
@@ -144,11 +152,22 @@ classdef MultiBodySystem  < handle
                 symVar = sym(paramName, 'real');
             end
     
-            % Store it
             obj.params.(paramName) = symVar;
+
+            if ~isempty(value)
+                obj.setParamValue(paramName, value)
+            end
+            
             if nargin>0
                 p = symVar;
             end
+        end
+
+        function setParamValue(obj, name, value)
+            if ~all(size(value)==size(obj.params.(name)))
+                error('Trying to set value of dimension %s to parameter of dimension %s.', mat2str(size(value)), mat2str(size(obj.params.(name))))
+            end
+            obj.param_values.(name) = value;
         end
 
         % Add input by name
@@ -665,6 +684,18 @@ classdef MultiBodySystem  < handle
 
             e = subs(e, struct2array(obj.inputs), vars.u);
             e = subs(e, struct2array(obj.params), vars.p);
+        end
+
+        function ap = getParameterArray(obj)
+            fn = fieldnames(obj.params);
+            ap = [];
+            for i = 1:length(fn)
+                if ~isfield(obj.param_values, fn{i})
+                    error('No value set for parameter "%s".', fn{i})
+                end
+                p = obj.param_values.(fn{i});
+                ap = [ap p(:)];
+            end
         end
 
         % TODO: refactor to use one common jacobian function called with
