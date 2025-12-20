@@ -200,41 +200,41 @@ fprintf(')\n');
 {{ 
     for i = 1:temp_data.getNumIn()
         i_ = i - 1;
-        fprintf('    in_name[%d] = "%s;"\n', i_, temp_data.getInName(i));
+        fprintf('    in_name[%d] = "%s";\n', i_, temp_data.getInName(i));
     end
 }}
 {{
     for i = 1:temp_data.getNumDOF()
         i_ = i - 1;
-        fprintf('    state_name[%d] = "%s;"\n', i_, temp_data.getQName(i));
+        fprintf('    state_name[%d] = "%s";\n', i_, temp_data.getQName(i));
     end    
 }}}
 
 void {{ fprintf("%s", temp_data.Name); }}::precalcConsts() {
 {{
-    const_selector = @(e)temp_data.isConstant(e);
+    const_selector = @(e)temp_data.isConstant(e, 'cpp');
     
-    M = temp_data.getM();
+    M = temp_data.replaceVars(temp_data.getM(), 'cpp');
     printAssignC(4, 'M', M, 'matrix', const_selector)
     fprintf("\n");
     
-    C = temp_data.getC();
+    C = temp_data.replaceVars(temp_data.getC(), 'cpp');
     printAssignC(4, 'C', C, 'matrix', const_selector)
     fprintf("\n");
 
-    K = temp_data.getK();
+    K = temp_data.replaceVars(temp_data.getK(), 'cpp');
     printAssignC(4, 'K', K, 'matrix', const_selector)
     fprintf("\n");
 
-    B = temp_data.getB();
+    B = temp_data.replaceVars(temp_data.getB(), 'cpp');
     printAssignC(4, 'B', B, 'matrix', const_selector)
     fprintf("\n");
 
-    CD = temp_data.getCD();
+    CD = temp_data.replaceVars(temp_data.getCD(), 'cpp');
     printAssignC(4, 'CD', CD, 'matrix', const_selector)
     fprintf("\n");
     
-    F = temp_data.getF();
+    F = temp_data.replaceVars(temp_data.getF(), 'cpp');
     printAssignC(4, 'F', F, 'matrix', const_selector)
 }}}
 
@@ -267,7 +267,7 @@ void {{ fprintf("%s", temp_data.Name); }}::precalcConsts() {
 void {{ fprintf("%s", temp_data.Name); }}::calcJacobian(real_type alphaM, real_type alphaC, real_type alphaK) {
 {{ 
     if temp_data.getNumExternals() > 0
-        fprintf("    calculateExternal();\n");
+        fprintf("    calculateExternalWithDeriv();\n");
     end
 }}
     {
@@ -281,13 +281,13 @@ void {{ fprintf("%s", temp_data.Name); }}::calcJacobian(real_type alphaM, real_t
     
     for i = 1:temp_data.getNumDOF()
         for j = 1:temp_data.getNumDOF()
-            if not_const_selector(M(i, j))
+            if ~not_const_selector(M(i, j))
                 M(i, j) = 0; % constant elements dont need to be optimized
             end
-            if not_const_selector(C(i, j))
+            if ~not_const_selector(C(i, j))
                 C(i, j) = 0; % constant elements dont need to be optimized
             end
-            if not_const_selector(K(i, j))
+            if ~not_const_selector(K(i, j))
                 K(i, j) = 0; % constant elements dont need to be optimized
             end
         end
@@ -307,7 +307,7 @@ void {{ fprintf("%s", temp_data.Name); }}::calcJacobian(real_type alphaM, real_t
     n = printAssignC(8, 'K', opt(:, (1:temp_data.getNumDOF())+1+2*temp_data.getNumDOF()), 'matrix', not_const_selector);
     if n>0, fprintf("\n"); end
 
-    printAssignC(8, 'f_', opt(:, 1), 'vector_par')
+    printAssignC(8, 'f', opt(:, 1), 'vector_par')
 }}    }
     
     Jacobian = alphaM*M + alphaC*C + alphaK*K;
@@ -329,7 +329,7 @@ void {{ fprintf("%s", temp_data.Name); }}::calcB() {
     B = temp_data.replaceVars(temp_data.getB(), 'cpp');
     for i = 1:temp_data.getNumDOF()
         for j = 1:temp_data.getNumIn()
-            if not_const_selector(B(i, j))
+            if ~not_const_selector(B(i, j))
                 B(i, j) = 0; % constant elements dont need to be optimized
             end
         end
@@ -349,31 +349,34 @@ void {{ fprintf("%s", temp_data.Name); }}::calcCDF() {
 {{ 
     not_const_selector = @(e)~temp_data.isConstant(e, 'cpp');
     
+    y = temp_data.replaceVars(struct2array(temp_data.outputs), 'cpp')';
     CD = temp_data.replaceVars(temp_data.getCD(), 'cpp');
     F = temp_data.replaceVars(temp_data.getF(), 'cpp');
     for i = 1:temp_data.getNumOut()
         for j = 1:(2*temp_data.getNumDOF()+temp_data.getNumIn())
-            if not_const_selector(CD(i, j))
+            if ~not_const_selector(CD(i, j))
                 CD(i, j) = 0; % constant elements dont need to be optimized
             end
         end
         for j = 1:temp_data.getNumDOF()
-            if not_const_selector(F(i, j))
+            if ~not_const_selector(F(i, j))
                 F(i, j) = 0; % constant elements dont need to be optimized
             end
         end
     end
     
-    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', [CD F]);
+    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', [y CD F]);
     opt = opt(1);
     for i = 1:length(tnames)
         printAssignC('        real_type ', char(tnames(i)), tvalues(i), 'scalar')
     end
     if ~isempty(tnames), fprintf("\n"); end
     
-    n = printAssignC(4, 'CD', opt(:, 1:(2*temp_data.getNumDOF()+temp_data.getNumIn())), 'matrix', not_const_selector);
+    n = printAssignC(4, 'y', opt(:, 1), 'vector_par');
     if n>0, fprintf("\n"); end
-    printAssignC(4, 'F', opt(:, (2*temp_data.getNumDOF()+temp_data.getNumIn()+1):end), 'matrix', not_const_selector)
+    n = printAssignC(4, 'CD', opt(:, 2:(2*temp_data.getNumDOF()+temp_data.getNumIn())+1), 'matrix', not_const_selector);
+    if n>0, fprintf("\n"); end
+    printAssignC(4, 'F', opt(:, (2*temp_data.getNumDOF()+temp_data.getNumIn()+1+1):end), 'matrix', not_const_selector)
 }}}
 
 void {{ fprintf("%s", temp_data.Name); }}::calcOut() {

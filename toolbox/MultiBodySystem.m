@@ -16,8 +16,7 @@ classdef MultiBodySystem  < handle
 
         outputs struct = struct()
 
-        params struct = struct()
-        param_values struct = struct()
+        params Parameters = []
 
         children (1,:) Body = Body.empty
 
@@ -42,6 +41,7 @@ classdef MultiBodySystem  < handle
     methods
         % Constructor with optional name
         function obj = MultiBodySystem(name, dof, input)
+            obj.params = Parameters();
             if nargin > 0
                 obj.Name = string(name);
             end
@@ -73,6 +73,8 @@ classdef MultiBodySystem  < handle
             % Define symbolic variable dynamically
             % symFun = symfun(str2sym([coordName '(time)']), obj.time);
             symFun = str2sym([coordName '(time)']);
+            assume(obj.time, 'real') % str2sym deletes the original assumptions
+            assumeAlso(symFun, 'real')
     
             % Store it
             obj.dof.(coordName) = symFun;
@@ -104,7 +106,9 @@ classdef MultiBodySystem  < handle
             % Define symbolic variable dynamically
             % symFun = symfun(str2sym([coordName '(time)']), obj.time);
             symFun = str2sym([coordName '(time)']);
-    
+            assume(obj.time, 'real') % str2sym deletes the original assumptions
+            assumeAlso(symFun, 'real')
+
             % Store it
             obj.doc.(coordName) = symFun;
             obj.doc.([coordName '_d']) = diff(symFun, obj.time);
@@ -117,12 +121,16 @@ classdef MultiBodySystem  < handle
         function p = addParameter(obj, paramName, dims, value)
             arguments
                 obj
-                paramName { MultiBodySystem.mustBeNonemptyCharOrCell }
+                paramName
                 dims = []
                 value = []
             end
-            if iscell(paramName)
-                p_ = [];
+            obj.checkSetupNotCompleted();
+
+            if isstruct(paramName)
+                obj.params.setParamRefStruct(paramName)
+            elseif iscell(paramName)
+                p_ = {};
                 for i = 1:length(paramName)
                     if ~iscell(dims)                
                         dims_ = dims;
@@ -134,40 +142,19 @@ classdef MultiBodySystem  < handle
                     else
                         value_ = value{i};
                     end
-                    p_(end+1) = obj.addParameter(paramName{i}, dims_, value_);
+                    p_{end+1} = obj.addParameter(paramName{i}, dims_, value_);
                 end
-                if nargin>0
-                    p = p_;
-                end                
-                return
-            end
-    
-            obj.checkSetupNotCompleted();
-            obj.checkName(paramName)
-    
-            % Define symbolic variable dynamically
-            if ~isempty(dims)
-                symVar = sym(paramName, dims, 'real');
             else
-                symVar = sym(paramName, 'real');
+                p_ = obj.params.addParameter(paramName, dims, value);
             end
-    
-            obj.params.(paramName) = symVar;
 
-            if ~isempty(value)
-                obj.setParamValue(paramName, value)
-            end
-            
-            if nargin>0
-                p = symVar;
+            if nargout>0
+                p = p_;
             end
         end
 
         function setParamValue(obj, name, value)
-            if ~all(size(value)==size(obj.params.(name)))
-                error('Trying to set value of dimension %s to parameter of dimension %s.', mat2str(size(value)), mat2str(size(obj.params.(name))))
-            end
-            obj.param_values.(name) = value;
+            obj.params.addParameter(name, [], value)
         end
 
         % Add input by name
@@ -189,6 +176,7 @@ classdef MultiBodySystem  < handle
     
             % Define symbolic variable dynamically
             symVar = sym(inName, 'real');
+            assume(symVar, 'real')
     
             % Store it
             obj.inputs.(inName) = symVar;
@@ -213,14 +201,20 @@ classdef MultiBodySystem  < handle
             arguments
                 obj
                 extName (1,:) char
-                depends sym
+                depends (1,:) sym = []
             end
     
             obj.checkSetupNotCompleted();            
             checkName(obj, extName)
     
             % Define symbolic variable dynamically
-            symFun = str2sym(string(extName) + "(" + join(string(depends), ',') + ")");
+            if isempty(depends)
+                symFun = sym(extName, 'real');
+            else
+                symFun = str2sym(string(extName) + "(" + join(string(depends), ',') + ")");
+                assume(depends, 'real') % str2sym deletes the original assumptions
+                assumeAlso(symFun, 'real')
+            end
     
             % Store it
             obj.externals.(extName) = symFun;
@@ -245,7 +239,9 @@ classdef MultiBodySystem  < handle
     
             % Define symbolic variable dynamically
             symFun = str2sym([auxName '(time)']);
-    
+            assume(obj.time, 'real') % str2sym deletes the original assumptions
+            assumeAlso(symFun, 'real')
+
             % Store it
             obj.aux_state.(auxName) = symFun;
         end
@@ -346,7 +342,7 @@ classdef MultiBodySystem  < handle
         end
 
         function n = getNumParams(obj)
-            n = length(fieldnames(obj.params));
+            n = obj.params.getNumParams();
         end
 
         function n = getNumExternals(obj)
@@ -457,16 +453,16 @@ classdef MultiBodySystem  < handle
                 naming {mustBeText} = 'real_name'
             end
             if isempty(i)
-                i = 1:length(fieldnames(obj.params));
+                i = 1:obj.params.getNumParams();
             end
             switch naming
                 case 'real_name'
-                    fn = fieldnames(obj.params);
+                    fn = obj.params.getParamNames();
                     n = fn(i)';
                 case 'numbered'
                     n = sprintfc('p_%d', i)';
                 case 'cpp'
-                    fn = fieldnames(obj.params);
+                    fn = obj.params.getParamNames();
                     n = strcat('PSTRUCT_', fn(i))';
             end
             if isscalar(n)
@@ -499,16 +495,6 @@ classdef MultiBodySystem  < handle
         end
 
         function tf = isConstant(obj, expr, naming)
-        %ISPURECONSTANT Determine whether a symbolic expression is constant.
-        %   TF = ISPURECONSTANT(EXPR, CONSTANTS_LIST) returns TRUE if EXPR contains
-        %   only:
-        %       - numeric literals,
-        %       - symbols in CONSTANTS_LIST,
-        %   regardless of what symbolic functions are applied to them.
-        %
-        %   Thus, sin(a), log(a + pi), exp(3*C1) are constant if 'a' and 'C1'
-        %   are included in CONSTANTS_LIST.
-        
             arguments
                 obj
                 expr sym
@@ -550,7 +536,7 @@ classdef MultiBodySystem  < handle
                 eom_ = eom_ + obj.children(i).collectGenForces;
             end
             
-            eom_ = simplify(eom_);
+            eom_ = simplify(eom_, 'Steps', 50);
             obj.eom = eom_;
         end
 
@@ -575,9 +561,9 @@ classdef MultiBodySystem  < handle
             eom_ = getEOM(obj);
             [eom_, vars]= obj.replaceVars(eom_, 'numbered');
             if ~exist('filename', 'var')
-                fun = matlabFunction(eom_, 'Vars', {vars.q_, vars.qd_, vars.qdd_, struct2array(obj.inputs), struct2array(obj.params)});            
+                fun = matlabFunction(eom_, 'Vars', {vars.q_, vars.qd_, vars.qdd_, struct2array(obj.inputs), struct2array(obj.params.getParamSyms())});            
             else
-                matlabFunction(eom_, 'File', filename, 'Vars', {vars.q_, vars.qd_, vars.qdd_, struct2array(obj.inputs), struct2array(obj.params)});
+                matlabFunction(eom_, 'File', filename, 'Vars', {vars.q_, vars.qd_, vars.qdd_, struct2array(obj.inputs), struct2array(obj.params.getParamSyms())});
             end
         end
 
@@ -588,9 +574,9 @@ classdef MultiBodySystem  < handle
             f_= simplify(eom_ + M_*vars.qdd_);
 
             if ~exist('filename', 'var')
-                fun = matlabFunction(M_, f_, 'Vars', {vars.q_, vars.qd_, struct2array(obj.inputs), struct2array(obj.params)});            
+                fun = matlabFunction(M_, f_, 'Vars', {vars.q_, vars.qd_, struct2array(obj.inputs), struct2array(obj.params.getParamSyms())});            
             else
-                matlabFunction(M_, f_, 'File', filename, 'Vars', {vars.q_, vars.qd_, struct2array(obj.inputs), struct2array(obj.params)});
+                matlabFunction(M_, f_, 'File', filename, 'Vars', {vars.q_, vars.qd_, struct2array(obj.inputs), struct2array(obj.params.getParamSyms())});
             end
         end
 
@@ -598,7 +584,7 @@ classdef MultiBodySystem  < handle
             eom_ = getEOM(obj);
             
             if isempty(fieldnames(obj.inputs))
-                inputs_ = sym('dummy');
+                inputs_ = sym('dummy', 'real');
             else
                 inputs_ = struct2array(obj.inputs);
             end
@@ -606,18 +592,22 @@ classdef MultiBodySystem  < handle
             % daeFunction doesn't work with symfuns
             fn = fieldnames(obj.externals);
             if isempty(fn)
-                externalSyms = sym('dummy');
+                externalSyms = sym('dummy', 'real');
             else
                 externalSyms= sym.empty(1, 0);
                 for i = 1:length(fn)
-                    externalSyms(end+1) = sym(fn{i});
+                    externalSyms(end+1) = sym(fn{i}, 'real');
                 end
                 eom_ = subs(eom_, struct2array(obj.externals), externalSyms);
             end
 
             for i = 1:length(obj.q)
                 x1(i, 1) = symfun(str2sym(sprintf('x1_%d(time)', i)), obj.time);
+                assume(obj.time, 'real') % str2sym deletes the original assumptions
+                assumeAlso(x1(i, 1), 'real')
                 x2(i, 1) = symfun(str2sym(sprintf('x2_%d(time)', i)), obj.time);
+                assume(obj.time, 'real') % str2sym deletes the original assumptions
+                assumeAlso(x2(i, 1), 'real')
             end
             x = [x1 ; x2; struct2array(obj.aux_state)];
 
@@ -628,9 +618,9 @@ classdef MultiBodySystem  < handle
             f_impl = [diff(x1, obj.time) == x2 ; eom_; obj.aux_impl_ode];
 
             if ~exist('filename', 'var')
-                fun = daeFunction(f_impl, x, inputs_, externalSyms, struct2array(obj.params));
+                fun = daeFunction(f_impl, x, inputs_, externalSyms, struct2array(obj.params.getParamSyms()));
             else
-                daeFunction(f_impl, x, inputs_, externalSyms, struct2array(obj.params), 'File', filename);
+                daeFunction(f_impl, x, inputs_, externalSyms, struct2array(obj.params.getParamSyms()), 'File', filename);
             end
         end
 
@@ -641,8 +631,11 @@ classdef MultiBodySystem  < handle
                 naming {mustBeText} = 'real_name'
             end
             vars.qdd = str2sym(obj.getQddName([], naming));
+            assume(vars.qdd, 'real')
             vars.qd = str2sym(obj.getQdName([], naming));
+            assume(vars.qd, 'real')
             vars.q = str2sym(obj.getQName([], naming));
+            assume(vars.q, 'real')
 
             e = subs(e, diff(obj.q, obj.time, 2), vars.qdd);
             e = subs(e, diff(obj.q, obj.time), vars.qd);
@@ -663,6 +656,7 @@ classdef MultiBodySystem  < handle
             for i = 1:length(exts)
                 partial_names = obj.getExternalDerivs(i, naming);
                 partial_syms = str2sym(partial_names);
+                assume(partial_syms, 'real')
                 deps = obj.external_deps.(ext_names{i});
                 for j = 1:length(deps)
                     % partial_deriv = functionalDerivative(obj.externals(i), deps(j));
@@ -672,7 +666,8 @@ classdef MultiBodySystem  < handle
                 ext_d{i} = partial_syms;
             end
             ext_vars = str2sym(obj.getExternalName([], naming));
-            e = subs(e, exts, ext_vars);
+            assume(ext_vars, 'real')
+            e = subs(e, exts, ext_vars');
 
             [e, vars] = replaceDOFs(obj, e, naming);
             
@@ -680,20 +675,23 @@ classdef MultiBodySystem  < handle
             vars.ext_d = ext_d;
 
             vars.u = str2sym(obj.getInName([], naming));
+            assume(vars.u, 'real')
             vars.p = str2sym(obj.getParamName([], naming));
+            assume(vars.p, 'real')
 
-            e = subs(e, struct2array(obj.inputs), vars.u);
-            e = subs(e, struct2array(obj.params), vars.p);
+
+            e = subs(e, struct2array(obj.inputs), vars.u');
+            e = subs(e, struct2array(obj.params.getParamSyms()), vars.p);
         end
 
         function ap = getParameterArray(obj)
-            fn = fieldnames(obj.params);
+            fn = obj.params.getParamNames();
             ap = [];
             for i = 1:length(fn)
-                if ~isfield(obj.param_values, fn{i})
+                if ~obj.params.hasValue(fn{i})
                     error('No value set for parameter "%s".', fn{i})
                 end
-                p = obj.param_values.(fn{i});
+                p = obj.params.getValue(fn{i});
                 ap = [ap p(:)];
             end
         end
@@ -744,7 +742,7 @@ classdef MultiBodySystem  < handle
                 return
             end
             eom_ = obj.getEOM();
-            B_= jacobian(eom_, struct2array(obj.inputs));
+            B_= -jacobian(eom_, struct2array(obj.inputs));
             obj.B = B_;
         end
 
@@ -755,7 +753,7 @@ classdef MultiBodySystem  < handle
                 CD_ = obj.CD;
                 return
             end
-            CD_= jacobian(struct2array(obj.outputs), [obj.q; diff(obj.q, obj.time); struct2array(obj.inputs)]);
+            CD_= jacobian(struct2array(obj.outputs), [obj.q; diff(obj.q, obj.time); struct2array(obj.inputs)']);
             obj.CD = CD_;
         end
 
@@ -771,7 +769,7 @@ classdef MultiBodySystem  < handle
         end
 
         function v = paramVec(obj, p)
-            pv = struct2array(obj.params);
+            pv = struct2array(obj.params.getParamSyms());
             v = zeros(size(pv));
 
             for i= 1:length(pv)
@@ -813,13 +811,13 @@ classdef MultiBodySystem  < handle
                     error("Constraint coordinate name '%s' already exists in the system.", name);
                 end
             end
-            if isfield(obj.params, name)
-                if nargout>0
-                    name_in_use= true;
-                else
-                    error("Parameter name '%s' already exists in the system.", name);
-                end
-            end
+            % if obj.params.paramInUse(name)
+            %     if nargout>0
+            %         name_in_use= true;
+            %     else
+            %         error("Parameter name '%s' already exists in the system.", name);
+            %     end
+            % end
             if isfield(obj.inputs, name)
                 if nargout>0
                     name_in_use= true;
