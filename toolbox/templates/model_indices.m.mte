@@ -12,7 +12,7 @@ end
 }}
 {{ 
 for i = 1:temp_data.getNumDOF
-    fprintf("%s_idx= %d;\n", temp_data.getQdName(i), i);
+    fprintf("%s_idx= %d;\n", temp_data.getQdName(i), i+temp_data.getNumDOF);
 end
 }}
 {{ 

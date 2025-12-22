@@ -1,61 +1,67 @@
 classdef SID  < handle
     properties
+        name (1,:) char = ''
         comment (1,:) char = ''
         mass (1,1) = 0
         nelastq (1,1) double = 0
         ielastq (1,:) cell = {}
         frame (1,:) ElasticFrame = ElasticFrame.empty
-        I ElasticTaylor 
-        md ElasticTaylor
-        Ct ElasticTaylor
-        Cr ElasticTaylor
-        Me ElasticTaylor
-        Gr ElasticTaylor
-        Oe ElasticTaylor
-        Ge ElasticTaylor
-        Ke ElasticTaylor
-        De ElasticTaylor
+        I ElasticTaylor         % M0: 3x3,  M1: 3x3xnq
+        md ElasticTaylor        % M0: 3x1,  M1: 3x1xnq;     M1=reshape(Ct.M0', 3, 1, [])
+        Ct ElasticTaylor        % M0: nqx3, M1: nqx3xnq
+        Cr ElasticTaylor        % M0: nqx3, M1: nqx3xnq
+        Me ElasticTaylor        % M0: nqxnq
+        Gr ElasticTaylor        % M0: 3xnq*3 -> 3x3xnq (parameter numbering: nqx3x3)
+        Oe ElasticTaylor        % M0: nqx6, M1: nqx6xnq 
+        Ge ElasticTaylor        % M0: nqxnq*3 -> nqx3xnq (parameter numbering: nqxnqx3)
+        Ke ElasticTaylor        % M0: nqxnq
+        De ElasticTaylor        % M0: nqxnq
+        % according to standard, M1 dimensions 2 and 3 should be switched
     end
 
     methods
         % Constructor
+        % TODO: rewrite with varargin
+        % alternative calling:SID(sid_struct, tolerance, name, system)
         function obj = SID(nedof, n_frames, name, system)
             arguments
                 nedof
-                n_frames (1,1) double = 0;
+                n_frames double = 0;
                 name = ''
                 system = []
             end
+            obj.name = name;
             if isstruct(nedof)
                 sid_struct= nedof;
                 % Specify relative tolerance for which parameters shall be
                 % omitted.
                 % If non-zero, values are changed to parameters.
-                rel_tol = n_frames;
+                tol = n_frames;
 
                 obj.nelastq = sid_struct.refmod.nelastq;
                 obj.comment = sid_struct.comment;
                 obj.ielastq = sid_struct.refmod.ielastq;
-                if rel_tol~=0
+                if ~all(tol==0)
                     obj.mass= system.addParameter([name '_mass'], [], sid_struct.refmod.mass);
                 else
                     obj.mass= sid_struct.refmod.mass;
                 end
     
                 for i = 1:length(sid_struct.frame)
-                    obj.frame(i) = ElasticFrame(sid_struct.frame(i), sprintf('%s_frame_%d', name, i), rel_tol, system);
+                    obj.frame(i) = ElasticFrame(sid_struct.frame(i), sprintf('%s_frame_%d', name, i), tol, system);
                 end
                 
-                obj.md = ElasticTaylor(sid_struct.md, 0, rel_tol, [name '_md'], system);
-                obj.I = ElasticTaylor(sid_struct.I, 0, rel_tol, [name '_I'], system); % 2nd order element currently not supported
-                obj.Ct = ElasticTaylor(sid_struct.Ct, 0, rel_tol, [name '_Ct'], system);
-                obj.Cr = ElasticTaylor(sid_struct.Cr, 0, rel_tol, [name '_Cr'], system);
-                obj.Me = ElasticTaylor(sid_struct.Me, 0, rel_tol, [name '_Me'], system);
-                obj.Gr = ElasticTaylor(sid_struct.Gr, obj.nelastq, rel_tol, [name '_Gr'], system);
-                obj.Ge = ElasticTaylor(sid_struct.Ge, obj.nelastq, rel_tol, [name '_Ge'], system);
-                obj.Oe = ElasticTaylor(sid_struct.Oe, 0, rel_tol, [name '_Oe'], system);
-                obj.Ke = ElasticTaylor(sid_struct.Ke, 0, rel_tol, [name '_K'], system);
-                obj.De = ElasticTaylor(sid_struct.De, 0, rel_tol, [name '_D'], system);
+                obj.Ct = ElasticTaylor(sid_struct.Ct, 0, tol, [name '_Ct'], system);
+                obj.Cr = ElasticTaylor(sid_struct.Cr, 0, tol, [name '_Cr'], system);
+                sid_struct.md.M1 = reshape(obj.Ct.M0', 3, 1, []);
+                obj.md = ElasticTaylor(sid_struct.md, 0, tol, [name '_md'], system);
+                obj.I = ElasticTaylor(sid_struct.I, 0, tol, [name '_I'], system); % 2nd order element currently not supported
+                obj.Me = ElasticTaylor(sid_struct.Me, 0, tol, [name '_Me'], system);
+                obj.Gr = ElasticTaylor(sid_struct.Gr, obj.nelastq, tol, [name '_Gr'], system);
+                obj.Ge = ElasticTaylor(sid_struct.Ge, obj.nelastq, tol, [name '_Ge'], system);
+                obj.Oe = ElasticTaylor(sid_struct.Oe, 0, tol, [name '_Oe'], system);
+                obj.Ke = ElasticTaylor(sid_struct.Ke, 0, tol, [name '_K'], system);
+                obj.De = ElasticTaylor(sid_struct.De, 0, tol, [name '_D'], system);
             else
                 obj.nelastq = nedof;
                 for i = 1:nedof
@@ -80,6 +86,34 @@ classdef SID  < handle
                 obj.Ke = ElasticTaylor(1, nedof, nedof, 0, nedof, 0, 2);
                 obj.De = ElasticTaylor(0, nedof, nedof, 0, nedof, 0, 2);
             end
+        end
+
+        % this function is only to compare the behavior of this new class
+        % to the maxima implementation
+        function write_maxima(obj, fn)
+            fid = fopen(fn, 'w');
+            fprintf(fid, '//* %d nodes, %d modes, generated by FEMBeam2SID MATLAB script on 16-Dec-2025 19:20:56 by jgeisler *//\n', length(obj.frame), obj.nelastq);
+            fprintf(fid, '%s: emptyElasticMode(%d);\n\n', obj.name, obj.nelastq);
+
+            fprintf(fid, '%s@refmod@mass: %s;\n', obj.name, char(obj.mass));
+            fprintf(fid, 'blade@refmod@ielastq[1]: "Eigen Mode    1 :      0.693356 Hz";\n\n');
+
+            for i = 1:length(obj.frame)
+                obj.frame(i).write_maxima(fid, sprintf('frame[%d]', i), i)
+            end
+
+            obj.md.write_maxima(fid, [obj.name '@md']);
+            obj.I.write_maxima(fid, [obj.name '@I']);
+            obj.Ct.write_maxima(fid, [obj.name '@Ct']);
+            obj.Cr.write_maxima(fid, [obj.name '@Cr']);
+            obj.Me.write_maxima(fid, [obj.name '@Me']);
+            obj.Gr.write_maxima(fid, [obj.name '@Gr']);
+            obj.Ge.write_maxima(fid, [obj.name '@Ge']);
+            obj.Oe.write_maxima(fid, [obj.name '@Oe']);
+            obj.Ke.write_maxima(fid, [obj.name '@K']);
+            obj.De.write_maxima(fid, [obj.name '@D']);
+
+            fclose(fid);
         end
     end
 end

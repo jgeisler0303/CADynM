@@ -174,7 +174,7 @@ classdef ElasticBody  < Body
                 Ge_ = zeros(1, 3);
                 for jef = 1:length(obj.ElasticDOF)
                     % TODO = check for correct order of jef and ief
-                    Ge_ = Ge_ + Ge(ief, :, jef) * eDOF_d(jef)*obj.sym_eps;
+                    Ge_ = Ge_ + squeeze(Ge(ief, :, jef)) * eDOF_d(jef)*obj.sym_eps;
                 end
                 obj.Fe(ief) = obj.Fe(ief) - Ge_ * omega_local;
             end

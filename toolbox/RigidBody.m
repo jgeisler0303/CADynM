@@ -38,5 +38,9 @@ classdef RigidBody  < Body
 
             obj.M = -PhiG_global * obj.alpha0 - crossmat(obj.omega0) * (PhiG_global * obj.omega0);
         end
+
+        function vars = collectVars(obj)
+            vars = [symvar(obj.mass) symvar(obj.I) ];
+        end
     end
 end

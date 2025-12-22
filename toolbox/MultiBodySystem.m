@@ -13,6 +13,7 @@ classdef MultiBodySystem  < handle
         inputs struct = struct()
         externals struct = struct()             % Externally calculated value that may depend on inputs and states
         external_deps struct = struct()         % Dependencies of the external
+        external_params (:,1) string = []
 
         outputs struct = struct()
 
@@ -151,6 +152,20 @@ classdef MultiBodySystem  < handle
             if nargout>0
                 p = p_;
             end
+        end
+
+        function p = addExternalParameter(obj, paramName, dims, value)
+            arguments
+                obj
+                paramName
+                dims = []
+                value = []
+            end
+            p = addParameter(obj, paramName, dims, value);
+            if isstruct(paramName)
+                paramName = fieldnames(paramName);
+            end
+            obj.external_params = [obj.external_params; string(paramName)];
         end
 
         function setParamValue(obj, name, value)
@@ -296,6 +311,11 @@ classdef MultiBodySystem  < handle
             obj.setupCompleted = true;
             
             obj.prepareKinematics();
+        end
+
+        function removeUnusedParameters(obj)
+            vars = [symvar(obj.eom) symvar(struct2array(obj.outputs)) symvar(obj.aux_impl_ode)];
+            obj.params.removeUnused([string(vars) obj.external_params(:)']);
         end
 
         % Get number of bodies
