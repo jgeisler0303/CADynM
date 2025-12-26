@@ -31,6 +31,10 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
 
         forcesPrepared = false                  % replace this by a general locking/finalization of the entire system
     end
+    properties (Constant)
+        sym_eps = sym('eps', 'real');           % variable to control cross terms of small (elastic) deformations
+        sym_eps_rot = sym('eps_rot', 'real');   % variable to control cross terms of small (elastic) rotations
+    end
 
     methods
         % Constructor
@@ -131,10 +135,11 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             obj.alpha0= diff(obj.omega0, obj.system.time);
 
             % Partial velocities
-            obj.v_p= jacobian(obj.v0, diff(obj.system.q, obj.system.time));
-            obj.omega_p= jacobian(obj.omega0, diff(obj.system.q, obj.system.time));
-            obj.vz_p= jacobian(obj.v0_z, diff(obj.system.z, obj.system.time));
-            obj.omegaz_p= jacobian(obj.omega0_z, diff(obj.system.z, obj.system.time));
+            % TODO: add explanation, why eps is removed here
+            obj.v_p= subs(jacobian(obj.v0, diff(obj.system.q, obj.system.time)), obj.sym_eps, 1);
+            obj.omega_p= subs(jacobian(obj.omega0, diff(obj.system.q, obj.system.time)), obj.sym_eps, 1);
+            obj.vz_p= subs(jacobian(obj.v0_z, diff(obj.system.z, obj.system.time)), obj.sym_eps, 1);
+            obj.omegaz_p= subs(jacobian(obj.omega0_z, diff(obj.system.z, obj.system.time)), obj.sym_eps, 1);
 
             for i= 1:length(obj.children)
                 obj.children(i).T0= obj.T0 * obj.children(i).T;
@@ -146,13 +151,13 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         end
 
         function calcGenForce(obj)
-            obj.Fgen = obj.v_p.' * (obj.F + obj.F_ext);
-            obj.Fgen = obj.Fgen + obj.omega_p.' * (obj.M + obj.M_ext);            
+            obj.Fgen = - obj.v_p.' * (obj.F + obj.F_ext);
+            obj.Fgen = obj.Fgen - obj.omega_p.' * (obj.M + obj.M_ext);            
         end
 
         function calcConstrForce(obj)
             obj.Fconstr = obj.vz_p.' * (obj.F + obj.F_ext);
-            obj.Fconstr = obj.Fconstr + obj.omegaz_p.' * (obj.M + obj.M_ext);            
+            obj.Fconstr = obj.Fconstr + obj.omegaz_p.' * (obj.M + obj.M_ext);
         end
 
         function Fgen = collectGenForces(obj)
@@ -161,13 +166,10 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 obj.forcesPrepared = true;
             end
             obj.calcGenForce();
-
-
-            Fgen = expand(obj.Fgen);
-            Fgen = mapSymType(Fgen, 'power', @(Z) subs(Z, sym('eps'), 0));
-            Fgen = subs(Fgen, sym('eps'), 1);
-            Fgen = simplify(Fgen);
-
+            
+            obj.Fgen = obj.removeEps(obj.Fgen);
+            
+            Fgen = obj.Fgen;
             for i= 1:length(obj.children)
                 Fgen = Fgen + obj.children(i).collectGenForces;
             end
@@ -180,12 +182,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             end
             obj.calcConstrForce();
 
-
-            Fconstr = expand(obj.Fconstr);
-            Fconstr = mapSymType(Fconstr, 'power', @(Z) subs(Z, sym('eps'), 0));
-            Fconstr = subs(Fconstr, sym('eps'), 1);
-            Fconstr = simplify(Fconstr);
-
+            Fconstr = obj.Fconstr;
             for i= 1:length(obj.children)
                 Fconstr = Fconstr + obj.children(i).collectConstrForces;
             end
@@ -212,6 +209,37 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             if ~(isnumeric(val) || isa(val,'sym'))
                 error('Value must be numeric or symbolic.');
             end
+        end
+    end
+    methods (Static)
+        function expr = removeEps(expr)
+            % remove small rotations
+            % TODO: why not also second order terms?
+            for i = 1:length(expr)
+                coeff_rot= coeffs(expr(i), Body.sym_eps_rot, 'All');
+                switch length(coeff_rot)
+                    case {0,1} % empty or no terms with eps_rot, nothing to do
+                    case {2,3} % only first and second order terms
+                        expr(i) = sum(coeff_rot); % eliminate eps_rot, same as subs(..., sym('eps_rot'), 1)
+                    otherwise % also higher oder terms
+                        expr(i) = sum(coeff_rot(end-2:end)); % remove higher order terms and eliminate eps_rot
+                end
+            end
+
+            % remove cross terms of small elastic terms
+            % TODO: add reference why only first order terms are kept
+            for i = 1:length(expr)
+                coeff_eps= coeffs(expr(i), Body.sym_eps, 'All');
+                switch length(coeff_eps)
+                    case {0,1} % empty or no terms with eps, nothing to do
+                    case 2 % only first order terms
+                        expr(i) = sum(coeff_eps); % eliminate eps, same as subs(..., sym('eps'), 1)
+                    otherwise % also higher oder terms
+                        expr(i) = sum(coeff_eps(end-1:end)); % remove higher order terms and eliminate eps
+                end
+            end
+            
+            % TODO: what about eps*eps_rot cross terms?
         end
     end
 end

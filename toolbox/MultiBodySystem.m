@@ -555,12 +555,18 @@ classdef MultiBodySystem  < handle
             for i= 1:length(obj.children)
                 eom_ = eom_ + obj.children(i).collectGenForces;
             end
-            
+
             eom_ = simplify(eom_, 'Steps', 50);
+            eom_ = collect(eom_, struct2array(obj.dof));
             obj.eom = eom_;
         end
 
-        function Fz_ = getConstraintForce(obj, name)
+        function Fz_ = getConstraintForce(obj, name, remove_eps)
+            arguments
+                obj 
+                name 
+                remove_eps = true;
+            end
             obj.checkSetupCompleted()
             if ~isempty(obj.eom)
                 Fz_ = obj.Fz;
@@ -573,8 +579,11 @@ classdef MultiBodySystem  < handle
                 Fz_ = simplify(Fz_);
                 obj.Fz = Fz_;
             end
-            
+
             Fz_ = Fz_(ismember(fieldnames(obj.doc_idx), name));
+            if remove_eps
+                Fz_ = Body.removeEps(Fz_);
+            end
         end
 
         function fun = eomFunO2(obj, filename)
@@ -762,7 +771,7 @@ classdef MultiBodySystem  < handle
                 return
             end
             eom_ = obj.getEOM();
-            B_= -jacobian(eom_, struct2array(obj.inputs));
+            B_= jacobian(eom_, struct2array(obj.inputs));
             obj.B = B_;
         end
 

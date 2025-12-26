@@ -152,11 +152,12 @@ void {{ fprintf('%sParameters::setFromFile', temp_data.Name); }}(const std::stri
 }   
 
 bool {{ fprintf('%sParameters::unsetParamsWithMsg', temp_data.Name); }}() {
-    if(unsetParams)
+    if(unsetParams) {
         fprintf(stderr, "The following parameters are not set:\n");
         for(auto const &i : info_map)
             if(!i.second.isSet)
                 fprintf(stderr, "%s\n", i.first.c_str());
+    }
     return unsetParams;
 }
 

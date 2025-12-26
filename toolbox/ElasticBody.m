@@ -6,8 +6,7 @@ classdef ElasticBody  < Body
         Fe_ext (:, 1) sym = 0
         e_p (:,:) sym = []
         ConstrLoads (1, :) cell = {}
-        ChildFrame (1,:) double = []
-        sym_eps = sym('eps', 'real');
+        ChildFrame (1,:) double = []    % number of frame to which a child is attached
     end
 
     methods
@@ -78,7 +77,7 @@ classdef ElasticBody  < Body
             if isempty(iframe) || (ischar(iframe) && strcmpi(iframe, 'last'))
                 iframe = length(obj.sid.frame);
             end
-            R = obj.sid.frame(iframe).ap.evalTaylor(obj.ElasticDOF, 1);
+            R = obj.sid.frame(iframe).ap.evalTaylor(obj.ElasticDOF, obj.sym_eps_rot*obj.sym_eps);
         end
         
         % calculate acceleration of elastic point in global coordinates
@@ -195,15 +194,15 @@ classdef ElasticBody  < Body
             % in prepareForces
             obj.applyContrLoads();
 
-            obj.Fgen = obj.v_p.' * (obj.F + obj.F_ext);
-            obj.Fgen = obj.Fgen + obj.omega_p.' * (obj.M + obj.M_ext);            
-            obj.Fgen = obj.Fgen + obj.e_p.' * (obj.Fe + obj.Fe_ext);           
+            obj.Fgen = - obj.v_p.' * (obj.F + obj.F_ext);
+            obj.Fgen = obj.Fgen - obj.omega_p.' * (obj.M + obj.M_ext);            
+            obj.Fgen = obj.Fgen - obj.e_p.' * (obj.Fe + obj.Fe_ext);           
         end
 
         function applyContrLoads(obj)
             for i = 1:length(obj.children)
                 if ~isempty(obj.ConstrLoads)
-                    constr_forces = obj.system.getConstraintForce(obj.ConstrLoads{i});
+                    constr_forces = obj.system.getConstraintForce(obj.ConstrLoads{i}, false);
                     for j = 1:length(obj.ElasticDOF)
                         % TODO: check if M0 needs to be considered
                         % (probably)
