@@ -68,6 +68,20 @@ classdef ElasticBody  < Body
             obj.children(end+1)= body;
         end
 
+        % Apply an elastic force to the generalized coordinates of this
+        % body
+        % the force vector has to have length equal to the number of
+        % elastic coordinates.
+        % TODO: add function to apply force to node to be multiplied by phi
+        function applyElasticForce(obj, Fe)
+            arguments
+                obj
+                Fe (:,1) sym
+            end
+
+            obj.Fe_ext = obj.Fe_ext + Fe;
+        end
+
         % Rotation matrix for elastic deformation
         function R = Trot_elast(obj, iframe)
             arguments
@@ -196,7 +210,8 @@ classdef ElasticBody  < Body
 
             obj.Fgen = - obj.v_p.' * (obj.F + obj.F_ext);
             obj.Fgen = obj.Fgen - obj.omega_p.' * (obj.M + obj.M_ext);            
-            obj.Fgen = obj.Fgen - obj.e_p.' * (obj.Fe + obj.Fe_ext);           
+            obj.Fgen = obj.Fgen - obj.e_p.' * (obj.Fe + obj.Fe_ext);
+            obj.Fgen = simplify(obj.Fgen);
         end
 
         function applyContrLoads(obj)

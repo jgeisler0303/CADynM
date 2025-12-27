@@ -35,6 +35,10 @@ classdef ElasticFrame  < handle
                 for i= 1:frame_struct.AP.nq
                     frame_struct.AP.M1(:, :, i) = crossmat(obj.psi.M0(:, i));
                 end
+                % save-guard against formerly wrong sid computation in FEMBeam2SID
+                if ~all(frame_struct.AP.M0==eye(3))
+                    error('Frame node orientation must always be a unit matix.')
+                end
                 obj.ap = ElasticTaylor(frame_struct.AP, 0, tol, [name '_ap'], system);
                 obj.sigma = ElasticTaylor(frame_struct.sigma, 0, tol, [name '_sigma'], system);                
             else

@@ -22,7 +22,7 @@ pendulum.rotateLocalAxis('y', pendulum_model.dof.phi_pend);
 pendulum.translate([0 0 pendulum_model.params.l]);
 cart.addChild(pendulum)
 
-pendulum_model.applyForce([pendulum_model.inputs.F_cart; 0; 0], cart)
+cart.applyForce([pendulum_model.inputs.F_cart; 0; 0])
 pendulum_model.addOutput('x', pendulum_model.dof.x_cart)
 pendulum_model.completeSetup;
 

@@ -11,7 +11,7 @@ movingBody.translate([testSystem.dof.x+testSystem.params.l 0 0]);
 
 testSystem.addChild(movingBody)
 
-testSystem.applyForce([testSystem.externals.F; 0; 0], movingBody)
+movingBody.applyForce([testSystem.externals.F; 0; 0])
 
 testSystem.completeSetup()
 [~,~]=mkdir('generated');

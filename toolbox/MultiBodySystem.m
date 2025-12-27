@@ -805,7 +805,20 @@ classdef MultiBodySystem  < handle
                 v(i) = p.(char(pv(i)));
             end
         end
+        function checkSetupCompleted(obj)
+            if ~obj.setupCompleted
+                error('Model setup has not been completed. Please run completeSetup first.')
+            end
+        end
+
+        function checkSetupNotCompleted(obj)
+            if obj.setupCompleted
+                error('Model setup has been completed. No further data can be added.')
+
+            end
+        end
     end
+
     methods (Access = private)
         % calculate kinematics
         function prepareKinematics(obj)
@@ -869,66 +882,8 @@ classdef MultiBodySystem  < handle
                 end
             end
         end
-
-        function checkSetupCompleted(obj)
-            if ~obj.setupCompleted
-                error('Model setup has not been completed. Please run completeSetup first.')
-            end
-        end
-
-        function checkSetupNotCompleted(obj)
-            if obj.setupCompleted
-                error('Model setup has been completed. No further data can be added.')
-
-            end
-        end
     end
-    methods (Static)
-        function applyForce(F, b1)
-            arguments
-                F (3,1) sym
-                b1 (1,1) Body
-            end
-            b1.F_ext = b1.F_ext + F;
-        end
-
-        function applyMoment(M, b1)
-            arguments
-                M (3,1) sym
-                b1 (1,1) Body
-            end
-            b1.M_ext = b1.M_ext + M;
-        end
-
-        function forceBetween(F, b1, b2)
-            arguments
-                F (3,1) sym
-                b1 (1,1) Body
-                b2 (1,1) Body
-            end
-            MultiBodySystem.applyForce(F, b1)
-            MultiBodySystem.applyForce(-F, b2)
-        end
-
-        function momentBetween(M, b1, b2)
-            arguments
-                M (3,1) sym
-                b1 (1,1) Body
-                b2 (1,1) Body
-            end
-            MultiBodySystem.applyMoment(M, b1)
-            MultiBodySystem.applyMoment(-M, b2)
-        end
-
-        function applyElasticForce(Fe, b1)
-            arguments
-                Fe (:,1) sym
-                b1 (1,1) ElasticBody
-            end
-
-            b1.Fe_ext = b1.Fe_ext + Fe;
-        end
-    end
+    
     methods (Static, Access = private)
         function mustBeNonemptyCharOrCell(v)
             if ~(ischar(v) && ~isempty(v) || iscellstr(v) && ~isempty(v))

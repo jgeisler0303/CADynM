@@ -29,7 +29,7 @@ top_mass.I(2, 2)= elastic_body_system.params.I_top;
 tower.addChild(top_mass)
 
 
-elastic_body_system.applyForce([elastic_body_system.inputs.F_cart; 0; 0], cart)
+cart.applyForce([elastic_body_system.inputs.F_cart; 0; 0])
 elastic_body_system.addOutput('x', elastic_body_system.dof.x_cart)
 elastic_body_system.addOutput('x_tow', elastic_body_system.dof.q_tow)
 elastic_body_system.completeSetup;

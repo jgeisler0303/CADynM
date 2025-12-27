@@ -3,7 +3,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         Name (1,:) char = ''
         Description (1,1) string = "No description"
 
-        T (4,4) sym = eye(4)                    % Homogeneous transformation matrix
+        T (4,4) sym = eye(4)                    % Homogeneous transformation matrix relative to parent. Multiply body coordinates with this matrix to get global coordinates
         children (1,:) Body = Body.empty         
         parent = []
         system (1,:) MultiBodySystem = MultiBodySystem.empty
@@ -152,12 +152,14 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
 
         function calcGenForce(obj)
             obj.Fgen = - obj.v_p.' * (obj.F + obj.F_ext);
-            obj.Fgen = obj.Fgen - obj.omega_p.' * (obj.M + obj.M_ext);            
+            obj.Fgen = obj.Fgen - obj.omega_p.' * (obj.M + obj.M_ext);
+            obj.Fgen = simplify(obj.Fgen);
         end
 
         function calcConstrForce(obj)
             obj.Fconstr = obj.vz_p.' * (obj.F + obj.F_ext);
             obj.Fconstr = obj.Fconstr + obj.omegaz_p.' * (obj.M + obj.M_ext);
+            obj.Fconstr = simplify(obj.Fconstr);
         end
 
         function Fgen = collectGenForces(obj)
@@ -187,9 +189,79 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 Fconstr = Fconstr + obj.children(i).collectConstrForces;
             end
         end
+
+        % Apply a force given in global coordinates to the center of gravitiy of this body
+        function applyForce(obj, F)
+            arguments
+                obj
+                F (3,1) sym
+            end
+            obj.F_ext = obj.F_ext + F;
+        end
+
+        % Apply a moment given in global coordinates to this body
+        function applyMoment(obj, M)
+            arguments
+                obj
+                M (3,1) sym
+            end
+            obj.M_ext = obj.M_ext + M;
+        end
+
+        % Apply a force given in global coordinates to this body and
+        % negative to another body
+        function forceBetween(obj, F, b2)
+            arguments
+                obj
+                F (3,1) sym
+                b2 (1,1) Body
+            end
+            obj.applyForce(F)
+            b2.applyForce(-F)
+        end
+
+        % Apply a moment given in global coordinates to this body and
+        % negative to another body
+        function momentBetween(obj, M, b2)
+            arguments
+                obj
+                M (3,1) sym
+                b2 (1,1) Body
+            end
+            obj.applyMoment(M)
+            b2.applyMoment(-M)
+        end
+        
+        % Apply a force given in body coordinates at a point on the body
+        % given in body coordinates
+        function applyForceInLocal(obj, r, F)
+            arguments
+                obj
+                r (3,1) sym         % position relative to center of mass or reference system in body local coordinates
+                F (3,1) sym         % force in body local coordinates
+            end
+            % make sure T0 is already available
+            obj.system.checkSetupCompleted()
+
+            Fin0 = obj.T0(1:3, 1:3) * F;
+            r0 = obj.T0(1:3, 1:3) * r;
+            obj.applyForceIn0(r0, Fin0)
+        end
+    
+        % Apply a force given in global coordinates at a point on the body
+        % given in global coordinates
+        function applyForceIn0(obj, r0, F0)
+            arguments
+                obj
+                r0 (3,1) sym         % position relative to center of mass or reference system in global coordinates
+                F0 (3,1) sym         % force in global coordinates
+            end
+            obj.applyForce(F0)
+            obj.applyMoment(crossmat(r0)*F0)
+        end        
     end
 
-    methods (Static, Access = private)
+    methods (Static)
         % Rodrigues' formula for rotation matrix and wrap into 4x4
         function T = rotationMatrix(axis, angle)
             x = axis(1); y = axis(2); z = axis(3);
@@ -210,8 +282,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 error('Value must be numeric or symbolic.');
             end
         end
-    end
-    methods (Static)
+
         function expr = removeEps(expr)
             % remove small rotations
             % TODO: why not also second order terms?

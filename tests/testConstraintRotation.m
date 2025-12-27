@@ -14,7 +14,7 @@ rotatingBody.translate([testSystem.params.l 0 0]);
 
 testSystem.addChild(rotatingBody)
 
-testSystem.applyForce([testSystem.inputs.Fx; 0; 0], rotatingBody)
+rotatingBody.applyForce([testSystem.inputs.Fx; 0; 0])
 
 testSystem.completeSetup()
 % testSystem.eomDae('testConstraintRotation_DAE.m')
