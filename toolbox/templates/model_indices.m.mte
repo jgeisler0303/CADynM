@@ -1,7 +1,7 @@
 {{ fprintf("%% Multibody system: %s\n", temp_data.Name); }}
 
-nq = {{ fprintf("%d", temp_data.getNumDOF); }};
-nx = {{ fprintf("%d", temp_data.getNumStates); }};
+nq = {{ fprintf("%d", temp_data.getNumDOF+temp_data.getNumAux); }};
+nx = {{ fprintf("%d", 2*temp_data.getNumDOF+2*temp_data.getNumAux); }};
 nu = {{ fprintf("%d", temp_data.getNumIn); }};
 ny = {{ fprintf("%d", temp_data.getNumOut); }};
 
@@ -9,10 +9,16 @@ ny = {{ fprintf("%d", temp_data.getNumOut); }};
 for i = 1:temp_data.getNumDOF
     fprintf("%s_idx= %d;\n", temp_data.getQName(i), i);
 end
+for i = 1:temp_data.getNumAux
+    fprintf("%s_idx= %d;\n", temp_data.getAuxName(i), i+temp_data.getNumDOF);
+end
 }}
 {{ 
 for i = 1:temp_data.getNumDOF
-    fprintf("%s_idx= %d;\n", temp_data.getQdName(i), i+temp_data.getNumDOF);
+    fprintf("%s_idx= %d;\n", temp_data.getQdName(i), i+temp_data.getNumDOF+temp_data.getNumAux);
+end
+for i = 1:temp_data.getNumAux
+    fprintf("%s_idx= %d;\n", temp_data.getAuxName(i, 1), i+2*temp_data.getNumDOF+temp_data.getNumAux);
 end
 }}
 {{ 
@@ -30,12 +36,18 @@ dof_names= {
 for i = 1:temp_data.getNumDOF
     fprintf("    '%s'\n", temp_data.getQName(i));
 end
+for i = 1:temp_data.getNumAux
+    fprintf("    '%s'\n", temp_data.getAuxName(i));
+end
 }}};
 
 dof_d_names= {
 {{ 
 for i = 1:temp_data.getNumDOF
     fprintf("    '%s'\n", temp_data.getQdName(i));
+end
+for i = 1:temp_data.getNumAux
+    fprintf("    '%s'\n", temp_data.getAuxName(i, 1));
 end
 }}};
 
@@ -44,8 +56,14 @@ state_names= {
 for i = 1:temp_data.getNumDOF
     fprintf("    '%s'\n", temp_data.getQName(i));
 end
+for i = 1:temp_data.getNumAux
+    fprintf("    '%s'\n", temp_data.getAuxName(i));
+end
 for i = 1:temp_data.getNumDOF
     fprintf("    '%s'\n", temp_data.getQdName(i));
+end
+for i = 1:temp_data.getNumAux
+    fprintf("    '%s'\n", temp_data.getAuxName(i, 1));
 end
 }}};
 

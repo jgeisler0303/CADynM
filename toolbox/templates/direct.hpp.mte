@@ -17,7 +17,7 @@ typedef double real_type;
 
 #define mcond(c, a, x, b) ((c)? a:b)
 
-class {{ fprintf('%s: public NewmarkBeta<%d, %d, %d, real_type>', temp_data.Name, temp_data.getNumDOF(), temp_data.getNumIn(), temp_data.getNumOut()); }} {
+class {{ fprintf('%s: public NewmarkBeta<%d, %d, %d, real_type>', temp_data.Name, temp_data.getNumDOF()+temp_data.getNumAux(), temp_data.getNumIn(), temp_data.getNumOut()); }} {
 public:
     {{ fprintf('%s', temp_data.Name); }}();
         
@@ -87,17 +87,29 @@ fprintf('    struct states_t {\n');
 fprintf('    public:\n');
 fprintf('        states_t(');
 for i = 1:temp_data.getNumDOF()
-    fprintf('real_type &%s, real_type &%s, real_type &%s', temp_data.getQName(i), temp_data.getQdName(i), temp_data.getQddName(i));
-    if i ~= temp_data.getNumDOF()
+    if i ~= 1
         fprintf(', ');
     end
+    fprintf('real_type &%s, real_type &%s, real_type &%s', temp_data.getQName(i), temp_data.getQdName(i), temp_data.getQddName(i));
+end
+for i = 1:temp_data.getNumAux()
+    if temp_data.getNumDOF()>0
+        fprintf(', ');
+    end
+    fprintf('real_type &%s, real_type &%s, real_type &%s', temp_data.getAuxName(i, 0), temp_data.getAuxName(i, 1), temp_data.getAuxName(i, 2));
 end
 fprintf(') : ');
 for i = 1:temp_data.getNumDOF()
-    fprintf('%s(%s), %s(%s), %s(%s)', temp_data.getQName(i), temp_data.getQName(i), temp_data.getQdName(i), temp_data.getQdName(i), temp_data.getQddName(i), temp_data.getQddName(i));
-    if i ~= temp_data.getNumDOF()
+    if i ~= 1
         fprintf(', ');
     end
+    fprintf('%s(%s), %s(%s), %s(%s)', temp_data.getQName(i), temp_data.getQName(i), temp_data.getQdName(i), temp_data.getQdName(i), temp_data.getQddName(i), temp_data.getQddName(i));
+end
+for i = 1:temp_data.getNumAux()
+    if temp_data.getNumDOF()>0
+        fprintf(', ');
+    end
+    fprintf('%s(%s), %s(%s), %s(%s)', temp_data.getAuxName(i), temp_data.getAuxName(i, 0), temp_data.getAuxName(i, 1), temp_data.getAuxName(i, 1), temp_data.getAuxName(i, 2), temp_data.getAuxName(i, 2));
 end
 fprintf(' {}\n\n');
 for i = 1:temp_data.getNumDOF()
@@ -105,11 +117,19 @@ for i = 1:temp_data.getNumDOF()
     fprintf('        real_type  &%s;\n', temp_data.getQdName(i));
     fprintf('        real_type  &%s;\n', temp_data.getQddName(i));
 end
+for i = 1:temp_data.getNumAux()
+    fprintf('        real_type  &%s;\n', temp_data.getAuxName(i, 0));
+    fprintf('        real_type  &%s;\n', temp_data.getAuxName(i, 1));
+    fprintf('        real_type  &%s;\n', temp_data.getAuxName(i, 2));
+end
 fprintf('    } states;\n\n');
 
 fprintf('    typedef struct {\n');
 for i = 1:temp_data.getNumDOF()
     fprintf('        int %s;\n', temp_data.getQName(i));
+end
+for i = 1:temp_data.getNumAux()
+    fprintf('        int %s;\n', temp_data.getAuxName(i, 0));
 end
 fprintf('    } states_idx_type;\n\n');
 
@@ -144,10 +164,16 @@ end
 {{ 
 fprintf('const %s::states_idx_type %s::states_idx= {', temp_data.Name, temp_data.Name);
 for i = 1:temp_data.getNumDOF()
-    fprintf('%d', i-1);
-    if i ~= temp_data.getNumDOF()
+    if i ~= 1
         fprintf(', ');
     end
+    fprintf('%d', i-1);
+end
+for i = 1:temp_data.getNumAux()
+    if temp_data.getNumDOF() ~= 0
+        fprintf(', ');
+    end
+    fprintf('%d', i-1+temp_data.getNumDOF());
 end
 fprintf('};\n');
 
@@ -189,11 +215,11 @@ for i = 1:temp_data.getNumOut()
 end
 
 fprintf('),\n    states(');
-for i = 1:temp_data.getNumDOF()
-    fprintf('q.data()[%d], qd.data()[%d], qdd.data()[%d]', i-1, i-1, i-1);
-    if i ~= temp_data.getNumDOF()
+for i = 1:temp_data.getNumDOF()+temp_data.getNumAux()
+    if i ~= 1
         fprintf(', ');
     end
+    fprintf('q.data()[%d], qd.data()[%d], qdd.data()[%d]', i-1, i-1, i-1);
 end
 fprintf(')\n');
 }}{
@@ -204,9 +230,14 @@ fprintf(')\n');
     end
 }}
 {{
+    i_ = 0;
     for i = 1:temp_data.getNumDOF()
-        i_ = i - 1;
         fprintf('    state_name[%d] = "%s";\n', i_, temp_data.getQName(i));
+        i_ = i_ + 1;
+    end    
+    for i = 1:temp_data.getNumAux()
+        fprintf('    state_name[%d] = "%s";\n', i_, temp_data.getAuxName(i));
+        i_ = i_ + 1;
     end    
 }}}
 
@@ -214,27 +245,27 @@ void {{ fprintf("%s", temp_data.Name); }}::precalcConsts() {
 {{
     const_selector = @(e)temp_data.isConstant(e, 'cpp');
     
-    M = temp_data.replaceVars(temp_data.getM(), 'cpp');
+    M = temp_data.replaceVars(temp_data.getM(true), 'cpp');
     printAssignC(4, 'M', M, 'matrix', const_selector)
     fprintf("\n");
     
-    C = temp_data.replaceVars(temp_data.getC(), 'cpp');
+    C = temp_data.replaceVars(temp_data.getC(true), 'cpp');
     printAssignC(4, 'C', C, 'matrix', const_selector)
     fprintf("\n");
 
-    K = temp_data.replaceVars(temp_data.getK(), 'cpp');
+    K = temp_data.replaceVars(temp_data.getK(true), 'cpp');
     printAssignC(4, 'K', K, 'matrix', const_selector)
     fprintf("\n");
 
-    B = temp_data.replaceVars(temp_data.getB(), 'cpp');
+    B = temp_data.replaceVars(temp_data.getB(true), 'cpp');
     printAssignC(4, 'B', B, 'matrix', const_selector)
     fprintf("\n");
 
-    CD = temp_data.replaceVars(temp_data.getCD(), 'cpp');
+    CD = temp_data.replaceVars(temp_data.getCD(true), 'cpp');
     printAssignC(4, 'CD', CD, 'matrix', const_selector)
     fprintf("\n");
     
-    F = temp_data.replaceVars(temp_data.getF(), 'cpp');
+    F = temp_data.replaceVars(temp_data.getF(true), 'cpp');
     printAssignC(4, 'F', F, 'matrix', const_selector)
 }}}
 
@@ -249,7 +280,7 @@ void {{ fprintf("%s", temp_data.Name); }}::precalcConsts() {
 }}
     {
 {{
-    eom = temp_data.replaceVars(temp_data.getEOM(), 'cpp');
+    eom = temp_data.replaceVars(temp_data.getEOM(true), 'cpp');
     
     [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', eom);
     opt = opt(1);
@@ -274,13 +305,14 @@ void {{ fprintf("%s", temp_data.Name); }}::calcJacobian(real_type alphaM, real_t
 {{ 
     not_const_selector = @(e)~temp_data.isConstant(e, 'cpp');
     
-    eom = temp_data.replaceVars(temp_data.getEOM(), 'cpp');
-    M = temp_data.replaceVars(temp_data.getM(), 'cpp');
-    C = temp_data.replaceVars(temp_data.getC(), 'cpp');
-    K = temp_data.replaceVars(temp_data.getK(), 'cpp');
+    eom = temp_data.replaceVars(temp_data.getEOM(true), 'cpp');
+    M = temp_data.replaceVars(temp_data.getM(true), 'cpp');
+    C = temp_data.replaceVars(temp_data.getC(true), 'cpp');
+    K = temp_data.replaceVars(temp_data.getK(true), 'cpp');
     
-    for i = 1:temp_data.getNumDOF()
-        for j = 1:temp_data.getNumDOF()
+    n_dof_aux = temp_data.getNumDOF()+temp_data.getNumAux();
+    for i = 1:n_dof_aux
+        for j = 1:n_dof_aux
             if ~not_const_selector(M(i, j))
                 M(i, j) = 0; % constant elements dont need to be optimized
             end
@@ -300,11 +332,11 @@ void {{ fprintf("%s", temp_data.Name); }}::calcJacobian(real_type alphaM, real_t
     end
     if ~isempty(tnames), fprintf("\n"); end
         
-    n = printAssignC(8, 'M', opt(:, (1:temp_data.getNumDOF())+1), 'matrix', not_const_selector);
+    n = printAssignC(8, 'M', opt(:, (1:n_dof_aux)+1), 'matrix', not_const_selector);
     if n>0, fprintf("\n"); end
-    n = printAssignC(8, 'C', opt(:, (1:temp_data.getNumDOF())+1+temp_data.getNumDOF()), 'matrix', not_const_selector);
+    n = printAssignC(8, 'C', opt(:, (1:n_dof_aux)+1+n_dof_aux), 'matrix', not_const_selector);
     if n>0, fprintf("\n"); end
-    n = printAssignC(8, 'K', opt(:, (1:temp_data.getNumDOF())+1+2*temp_data.getNumDOF()), 'matrix', not_const_selector);
+    n = printAssignC(8, 'K', opt(:, (1:n_dof_aux)+1+2*n_dof_aux), 'matrix', not_const_selector);
     if n>0, fprintf("\n"); end
 
     printAssignC(8, 'f', opt(:, 1), 'vector_par')
@@ -326,8 +358,8 @@ void {{ fprintf("%s", temp_data.Name); }}::calcB() {
 {{ 
     not_const_selector = @(e)~temp_data.isConstant(e, 'cpp');
     
-    B = temp_data.replaceVars(temp_data.getB(), 'cpp');
-    for i = 1:temp_data.getNumDOF()
+    B = temp_data.replaceVars(temp_data.getB(true), 'cpp');
+    for i = 1:(temp_data.getNumDOF()+temp_data.getNumAux())
         for j = 1:temp_data.getNumIn()
             if ~not_const_selector(B(i, j))
                 B(i, j) = 0; % constant elements dont need to be optimized
@@ -350,21 +382,22 @@ void {{ fprintf("%s", temp_data.Name); }}::calcCDF() {
     not_const_selector = @(e)~temp_data.isConstant(e, 'cpp');
     
     y = temp_data.replaceVars(struct2array(temp_data.outputs), 'cpp')';
-    CD = temp_data.replaceVars(temp_data.getCD(), 'cpp');
-    F = temp_data.replaceVars(temp_data.getF(), 'cpp');
+    CD = temp_data.replaceVars(temp_data.getCD(true), 'cpp');
+    F = temp_data.replaceVars(temp_data.getF(true), 'cpp');
+    
     for i = 1:temp_data.getNumOut()
-        for j = 1:(2*temp_data.getNumDOF()+temp_data.getNumIn())
+        for j = 1:(2*temp_data.getNumDOF()+2*temp_data.getNumAux()+temp_data.getNumIn())
             if ~not_const_selector(CD(i, j))
                 CD(i, j) = 0; % constant elements dont need to be optimized
             end
         end
-        for j = 1:temp_data.getNumDOF()
+        for j = 1:(temp_data.getNumDOF()+temp_data.getNumAux())
             if ~not_const_selector(F(i, j))
                 F(i, j) = 0; % constant elements dont need to be optimized
             end
         end
     end
-    
+
     [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', [y CD F]);
     opt = opt(1);
     for i = 1:length(tnames)
@@ -374,9 +407,9 @@ void {{ fprintf("%s", temp_data.Name); }}::calcCDF() {
     
     n = printAssignC(4, 'y', opt(:, 1), 'vector_par');
     if n>0, fprintf("\n"); end
-    n = printAssignC(4, 'CD', opt(:, 2:(2*temp_data.getNumDOF()+temp_data.getNumIn())+1), 'matrix', not_const_selector);
+    n = printAssignC(4, 'CD', opt(:, 2:(2*temp_data.getNumDOF()+2*temp_data.getNumAux()+temp_data.getNumIn())+1), 'matrix', not_const_selector);
     if n>0, fprintf("\n"); end
-    printAssignC(4, 'F', opt(:, (2*temp_data.getNumDOF()+temp_data.getNumIn()+1+1):end), 'matrix', not_const_selector)
+    printAssignC(4, 'F', opt(:, (2*temp_data.getNumDOF()+2*temp_data.getNumAux()+temp_data.getNumIn()+1+1):end), 'matrix', not_const_selector)
 }}}
 
 void {{ fprintf("%s", temp_data.Name); }}::calcOut() {

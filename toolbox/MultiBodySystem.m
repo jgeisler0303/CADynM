@@ -334,23 +334,37 @@ classdef MultiBodySystem  < handle
         end
         
         % Get the time derivative of auxilliary state
-        function dx = getTimeDeriv(obj, dof, order)
+        function dx = getTimeDeriv(obj, var, order)
             arguments
                 obj
-                dof (1,1) sym
+                var (:,1) sym
                 order (1,1) double = 1
             end
 
-            dx = diff(dof, obj.time, order);
+            dx = diff(var, obj.time, order);
+        end
+
+        function x = getAuxState(obj, ii)
+            fn = fieldnames(obj.aux_state);
+            x = sym.empty;
+            for i = ii
+                x(end+1) = obj.aux_state.(fn{i});
+            end
         end
 
         function n = getNumDOF(obj)
             n = length(obj.q);
         end
+        
+        % TODO also add getNumAuxStates for higher order auxilliary ODEs
+        function n = getNumAux(obj)
+            n = length(fieldnames(obj.aux_state));
+        end
 
         function n = getNumStates(obj)
             % TODO: later change to possibly number reduced by unnecessary states
-            n = 2*length(obj.q);
+            % TODO: check for higher order auxilliary ODEs
+            n = 2*obj.getNumDOF + obj.getNumAux();
         end
 
         function n = getNumIn(obj)
@@ -432,6 +446,44 @@ classdef MultiBodySystem  < handle
                     n = sprintfc('qdd_%d', i)';
                 case 'cpp'
                     n = sprintfc('qdd_IDX%dXDI_', i-1)';
+            end
+            if isscalar(n)
+                n = n{1};
+            end
+        end
+
+        function n = getAuxName(obj, i, deriv, naming)
+            arguments
+                obj 
+                i (1,:) double = 1:length(obj.q)
+                deriv (1,1) double = 0
+                naming {mustBeText} = 'real_name'
+            end
+            if isempty(i)
+                i = 1:obj.getNumAux();
+            end
+            if deriv>0
+                deriv_str = repmat('d', 1, deriv);
+            else
+                deriv_str = 0;
+            end
+
+            switch naming
+                case 'real_name'
+                    fn = fieldnames(obj.aux_state);
+                    if deriv>0
+                        n = strcat(fn(i), ['_' deriv_str]);
+                    else
+                        n = fn(i);
+                    end
+                case 'numbered'
+                    basename = 'aux';
+                    if deriv>0
+                        basename = [basename deriv_str];
+                    end
+                    n = sprintfc('%s_%d', basename, i)';
+                case 'cpp'
+                    n = sprintfc(['q' deriv_str '_IDX%dXDI_'], i-1+obj.getNumDOF)';
             end
             if isscalar(n)
                 n = n{1};
@@ -545,20 +597,27 @@ classdef MultiBodySystem  < handle
             end
         end
 
-        function eom_ = getEOM(obj)
+        function eom_ = getEOM(obj, with_aux)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
+            end
             obj.checkSetupCompleted()
             if ~isempty(obj.eom)
                 eom_ = obj.eom;
-                return
+            else
+                eom_ = sym(zeros(length(obj.q), 1));
+                for i= 1:length(obj.children)
+                    eom_ = eom_ + obj.children(i).collectGenForces;
+                end
+    
+                eom_ = simplify(eom_, 'Steps', 50);
+                eom_ = collect(eom_, struct2array(obj.dof));
+                obj.eom = eom_;
             end
-            eom_ = sym(zeros(length(obj.q), 1));
-            for i= 1:length(obj.children)
-                eom_ = eom_ + obj.children(i).collectGenForces;
+            if with_aux
+                eom_ = [eom_; obj.aux_impl_ode];
             end
-
-            eom_ = simplify(eom_, 'Steps', 50);
-            eom_ = collect(eom_, struct2array(obj.dof));
-            obj.eom = eom_;
         end
 
         function Fz_ = getConstraintForce(obj, name, remove_eps)
@@ -669,6 +728,17 @@ classdef MultiBodySystem  < handle
             e = subs(e, diff(obj.q, obj.time, 2), vars.qdd);
             e = subs(e, diff(obj.q, obj.time), vars.qd);
             e = subs(e, obj.q, vars.q);
+
+            vars.aux = str2sym(obj.getAuxName([], 0, naming));
+            assume(vars.aux, 'real')
+            vars.auxd = str2sym(obj.getAuxName([], 1, naming));
+            assume(vars.aux, 'real')
+            vars.auxdd = str2sym(obj.getAuxName([], 2, naming));
+            assume(vars.aux, 'real')
+
+            e = subs(e, obj.getTimeDeriv(struct2array(obj.aux_state), 2), vars.auxdd);
+            e = subs(e, obj.getTimeDeriv(struct2array(obj.aux_state), 1), vars.auxd);
+            e = subs(e, struct2array(obj.aux_state), vars.aux);
         end
 
         function [e, vars] = replaceVars(obj, e, naming)
@@ -725,76 +795,152 @@ classdef MultiBodySystem  < handle
             end
         end
 
+        function J = getJacobian(obj, vars, cached, with_aux)
+            arguments
+                obj 
+                vars (:, 1) sym
+                cached sym
+                with_aux (1,1) logical = false
+            end
+            obj.checkSetupCompleted()
+            n_states = obj.getNumDOF;
+            if with_aux
+                n_states = n_states + obj.getNumAux;
+            end
+            if size(cached, 1)>=n_states
+                J = cached(1:n_states, 1:n_states);
+            else
+                eom_ = obj.getEOM(with_aux);
+
+                J= jacobian(eom_, vars);
+            end
+        end
         % TODO: refactor to use one common jacobian function called with
         % different derivative vectors
         % Generalized mass matrix
-        function M_ = getM(obj)
-            obj.checkSetupCompleted()
-            if ~isempty(obj.M)
-                M_ = obj.M;
-                return
+        function M_ = getM(obj, with_aux)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
             end
-            eom_ = obj.getEOM();
-            M_= jacobian(eom_, diff(obj.q, obj.time, 2));
+            vars = obj.getTimeDeriv(obj.q, 2);
+            if with_aux
+                vars = [vars; obj.getTimeDeriv(struct2array(obj.aux_state), 2)];
+            end
+
+            M_ = getJacobian(obj, vars, obj.M, with_aux);
             obj.M = M_;
         end
 
         % Generalized coriolis and damping matrix
-        function C_ = getC(obj)
-            obj.checkSetupCompleted()
-            if ~isempty(obj.C)
-                C_ = obj.C;
-                return
+        function C_ = getC(obj, with_aux)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
             end
-            eom_ = obj.getEOM();
-            C_= jacobian(eom_, diff(obj.q, obj.time));
+            vars = obj.getTimeDeriv(obj.q, 1);
+            if with_aux
+                vars = [vars; obj.getTimeDeriv(struct2array(obj.aux_state), 1)];
+            end
+
+            C_ = getJacobian(obj, vars, obj.C, with_aux);
             obj.C = C_;
         end
 
         % Generalized stiffness matrix
-        function K_ = getK(obj)
-            obj.checkSetupCompleted()
-            if ~isempty(obj.K)
-                K_ = obj.K;
-                return
+        function K_ = getK(obj,  with_aux)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
             end
-            eom_ = obj.getEOM();
-            K_= jacobian(eom_, obj.q);
+            vars = obj.q;
+            if with_aux
+                vars = [vars; struct2array(obj.aux_state)];
+            end
+
+            K_ = getJacobian(obj, vars, obj.K, with_aux);
             obj.K = K_;
         end
 
         % Input Jacobian
-        function B_ = getB(obj)
-            obj.checkSetupCompleted()
-            if ~isempty(obj.B)
-                B_ = obj.B;
-                return
+        function B_ = getB(obj, with_aux)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
             end
-            eom_ = obj.getEOM();
-            B_= jacobian(eom_, struct2array(obj.inputs));
-            obj.B = B_;
+            obj.checkSetupCompleted()
+            n_eqns = obj.getNumDOF;
+            if with_aux
+                n_eqns = n_eqns + obj.getNumAux;
+            end
+            if isempty(fieldnames(obj.inputs)) || size(obj.B, 1)>=n_eqns
+                B_ = obj.B(1:n_eqns, :);
+            else
+                vars = struct2array(obj.inputs);
+                B_= jacobian(obj.getEOM(with_aux), vars);
+                obj.B = B_;
+            end
         end
 
         % Output Jacobian
-        function CD_ = getCD(obj)
-            obj.checkSetupCompleted()
-            if ~isempty(obj.CD) || isempty(fieldnames(obj.outputs))
-                CD_ = obj.CD;
-                return
+        function CD_ = getCD(obj, with_aux)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
             end
-            CD_= jacobian(struct2array(obj.outputs), [obj.q; diff(obj.q, obj.time); struct2array(obj.inputs)']);
-            obj.CD = CD_;
+            obj.checkSetupCompleted()
+
+            n_derivs = 2*obj.getNumDOF + obj.getNumIn;
+            if with_aux
+                n_derivs = n_derivs + 2*obj.getNumAux;
+            end
+            % CD may hold the jacobian with or without auxilliaries
+            % if it was prior computed without, it has to be recomputed
+            if isempty(fieldnames(obj.outputs)) || size(obj.CD, 2)>=n_derivs
+                if isempty(fieldnames(obj.outputs)) || size(obj.CD, 2)==n_derivs
+                    % it was last computed with auxilliaries and is
+                    % demanded again or it was computed without and is
+                    % demanded as such: no problem
+                    CD_ = obj.CD;
+                else
+                    % it was last computed with and is no demanded without
+                    % auxilliaries
+                    idx = [true(1, obj.getNumDOF) false(1, obj.getNumAux)];
+                    idx = [idx idx true(1, obj.getNumIn)];
+                    CD_ = obj.CD(:, idx);
+                end
+            else
+                if with_aux
+                    vars = [obj.q; struct2array(obj.aux_state); obj.getTimeDeriv(obj.q, 1); obj.getTimeDeriv(struct2array(obj.aux_state), 1); struct2array(obj.inputs)'];
+                else
+                    vars = [obj.q; obj.getTimeDeriv(obj.q, 1); struct2array(obj.inputs)'];
+                end
+                CD_= jacobian(struct2array(obj.outputs), vars);
+                obj.CD = CD_;
+            end
         end
 
         % Output Jacobian wrt accelerations
-        function F_ = getF(obj)
-            obj.checkSetupCompleted()
-            if ~isempty(obj.F) || isempty(fieldnames(obj.outputs))
-                F_ = obj.F;
-                return
+        function F_ = getF(obj, with_aux)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
             end
-            F_= jacobian(struct2array(obj.outputs), diff(obj.q, obj.time, 2));
-            obj.F = F_;
+            obj.checkSetupCompleted()
+            n_derivs = obj.getNumDOF;
+            if with_aux
+                n_derivs = n_derivs + obj.getNumAux;
+            end
+            if isempty(fieldnames(obj.outputs)) || size(obj.F, 2)>=n_derivs
+                F_ = obj.F(:, 1:n_derivs);
+            else
+                vars = obj.getTimeDeriv(obj.q, 2);
+                if with_aux
+                    vars = [vars; obj.getTimeDeriv(struct2array(obj.aux_state), 2)];
+                end
+                F_= jacobian(struct2array(obj.outputs), vars);
+                obj.F = F_;
+            end
         end
 
         function v = paramVec(obj, p)

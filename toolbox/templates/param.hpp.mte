@@ -11,30 +11,6 @@
 
 #include "ParameterInfo.hpp"
 
-#ifdef WITH_CONSTANTS
-{{ 
-fprintf("const int n_states= %d;\n", temp_data.getNumStates());
-fprintf("const int n_inputs= %d;\n\n", temp_data.getNumIn());
-
-j = 0;
-for i = 1:temp_data.getNumDOF()
-    fprintf("const int %s= %d;\n", temp_data.getQName(i), j);
-    j = j + 1;
-end
-
-for i = 1:temp_data.getNumDOF()
-    fprintf("const int %s= %d;\n", temp_data.getQdName(i), j);
-    j = j + 1;
-end
-
-j = 0;
-for i = 1:temp_data.getNumIn()
-    fprintf("const int %s= %d;\n", temp_data.getInName(i), j);
-    j = j + 1;
-end
-}}
-#endif
-
 class {{ fprintf('%sParameters', temp_data.Name); }} {
 public:
     {{ fprintf('%sParameters', temp_data.Name); }}();
