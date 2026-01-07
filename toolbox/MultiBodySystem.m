@@ -2,7 +2,7 @@ classdef MultiBodySystem  < handle
     properties
         Name (1,1) string = "UnnamedSystem"
         gravity (3,1) sym = 0
-        bodies struct = struct()  % Stores bodies by name
+        bodies struct = struct()                % All bodies in the system
         time (1,1) sym = sym('time', 'real')
         dof struct = struct()                   % Degrees of freedom
         dof_idx struct = struct()        
@@ -19,7 +19,7 @@ classdef MultiBodySystem  < handle
 
         params Parameters = []
 
-        children (1,:) Body = Body.empty
+        attached_bodies (1,:) Body = Body.empty % Bodies attached to the inertial frame
 
         aux_state struct = struct()             % auxiliary state names
         aux_impl_ode (:,1) sym = []             % auxiliary implicit first order ode        
@@ -34,6 +34,9 @@ classdef MultiBodySystem  < handle
         B (:,:) sym = []
         CD (:,:) sym = []
         F (:,:) sym = []
+
+        keep_dof logical = []                   % cache for positional states that are not unused
+        aux_ode_first_order logical = []        % cache for test result, if all aux ODEs are first order
     end
 
     properties (Access = private)
@@ -303,7 +306,7 @@ classdef MultiBodySystem  < handle
             
             body.parent= obj;
             body.system= obj;
-            obj.children(end+1)= body;
+            obj.attached_bodies(end+1)= body;
         end
 
         function completeSetup(obj)
@@ -361,10 +364,20 @@ classdef MultiBodySystem  < handle
             n = length(fieldnames(obj.aux_state));
         end
 
-        function n = getNumStates(obj)
-            % TODO: later change to possibly number reduced by unnecessary states
-            % TODO: check for higher order auxilliary ODEs
-            n = 2*obj.getNumDOF + obj.getNumAux();
+        function n = getNumStates(obj, eliminate_unused)
+            arguments
+                obj 
+                eliminate_unused (1,1) logical = false
+            end
+            obj.checkAuxODEFirstOrder()
+
+            if eliminate_unused
+                keep_dof_ = obj.getUsedPositionalStates();
+            else
+                keep_dof_ = true(length(obj.q), 1);
+            end
+            
+            n = sum(keep_dof_) + obj.getNumDOF + obj.getNumAux();
         end
 
         function n = getNumIn(obj)
@@ -455,7 +468,7 @@ classdef MultiBodySystem  < handle
         function n = getAuxName(obj, i, deriv, naming)
             arguments
                 obj 
-                i (1,:) double = 1:length(obj.q)
+                i (1,:) double = []
                 deriv (1,1) double = 0
                 naming {mustBeText} = 'real_name'
             end
@@ -488,6 +501,55 @@ classdef MultiBodySystem  < handle
             if isscalar(n)
                 n = n{1};
             end
+        end
+
+        function n = getStateNames(obj, eliminate_unused)
+            arguments
+                obj 
+                eliminate_unused (1,1) logical = false
+            end
+            
+            obj.checkAuxODEFirstOrder()
+            n = obj.getQName();
+            if eliminate_unused
+                keep_dof_ = obj.getUsedPositionalStates();
+                n = n(keep_dof_);
+            end
+            
+            n_qd = obj.getQdName();
+            if ~iscell(n_qd)
+                n_qd = {n_qd};
+            end
+            n_aux = obj.getAuxName();
+            if ~iscell(n_aux)
+                n_aux = {n_aux};
+            end
+            n = [n; n_qd; n_aux];
+        end
+
+        function nd = getDStateNames(obj, eliminate_unused)
+            arguments
+                obj 
+                eliminate_unused (1,1) logical = false
+            end
+            
+            obj.checkAuxODEFirstOrder()
+            nd = obj.getQName();
+            if eliminate_unused
+                keep_dof_ = obj.getUsedPositionalStates();
+                nd = nd(keep_dof_);
+            end
+            nd = strcat('dot_', nd);
+
+            n_qdd = obj.getQddName();
+            if ~iscell(n_qdd)
+                n_qdd = {n_qdd};
+            end
+            n_auxd = obj.getAuxName([], 1);
+            if ~iscell(n_auxd)
+                n_auxd = {n_auxd};
+            end
+            nd = [nd; n_qdd; n_auxd];
         end
 
         function n = getInName(obj, i, naming)
@@ -607,8 +669,8 @@ classdef MultiBodySystem  < handle
                 eom_ = obj.eom;
             else
                 eom_ = sym(zeros(length(obj.q), 1));
-                for i= 1:length(obj.children)
-                    eom_ = eom_ + obj.children(i).collectGenForces;
+                for i= 1:length(obj.attached_bodies)
+                    eom_ = eom_ + obj.attached_bodies(i).collectGenForces;
                 end
     
                 eom_ = simplify(eom_, 'Steps', 50);
@@ -618,6 +680,35 @@ classdef MultiBodySystem  < handle
             if with_aux
                 eom_ = [eom_; obj.aux_impl_ode];
             end
+        end
+
+        function [f_impl, i_state_idx] = getImplStateSpaceODE(obj, eliminate_unused)
+            arguments
+                obj 
+                eliminate_unused (1,1) logical = false
+            end
+            
+            % For now, only first order auxilliary ODEs are permitted
+            obj.checkAuxODEFirstOrder()
+
+            if eliminate_unused
+                keep_dof_ = obj.getUsedPositionalStates();
+            else
+                keep_dof_ = true(length(obj.q), 1);
+            end
+
+            for i = 1:length(obj.q)
+                % positonal state derivatives
+                % these have to match with the names produced in getDStateNames
+                dx1(i, 1) = sym(sprintf('dot_%s', obj.getQName(i)), 'real');
+            end
+
+            eom_ = getEOM(obj);
+
+            % TODO: check if some auxilliary ODEs are also intgrals
+            i_state_idx = [true(sum(keep_dof_), 1); false(length(eom_) + length(obj.aux_impl_ode), 1)];
+
+            f_impl = [dx1(keep_dof_) - obj.getTimeDeriv(obj.q(keep_dof_), 1) ; eom_; obj.aux_impl_ode];
         end
 
         function Fz_ = getConstraintForce(obj, name, remove_eps)
@@ -631,8 +722,8 @@ classdef MultiBodySystem  < handle
                 Fz_ = obj.Fz;
             else
                 Fz_ = sym(zeros(length(obj.z), 1));
-                for i= 1:length(obj.children)
-                    Fz_ = Fz_ + obj.children(i).collectConstrForces;
+                for i= 1:length(obj.attached_bodies)
+                    Fz_ = Fz_ + obj.attached_bodies(i).collectConstrForces;
                 end
                 
                 Fz_ = simplify(Fz_);
@@ -658,8 +749,8 @@ classdef MultiBodySystem  < handle
         function fun = eomFunDescriptor(obj, filename)
             eom_ =  getEOM(obj);
             [eom_, vars]= obj.replaceVars(eom_, 'numbered');
-            M_ = -getM(obj, eom_);
-            f_= simplify(eom_ + M_*vars.qdd_);
+            M_ = -getM(obj);
+            f_= simplify(eom_ + M_*vars.qdd);
 
             if ~exist('filename', 'var')
                 fun = matlabFunction(M_, f_, 'Vars', {vars.q_, vars.qd_, struct2array(obj.inputs), struct2array(obj.params.getParamSyms())});            
@@ -968,9 +1059,9 @@ classdef MultiBodySystem  < handle
     methods (Access = private)
         % calculate kinematics
         function prepareKinematics(obj)
-            for i= 1:length(obj.children)
-                obj.children(i).T0= obj.children(i).T;
-                obj.children(i).prepareKinematics;
+            for i= 1:length(obj.attached_bodies)
+                obj.attached_bodies(i).T0= obj.attached_bodies(i).T;
+                obj.attached_bodies(i).prepareKinematics;
             end
         end
 
@@ -1025,6 +1116,60 @@ classdef MultiBodySystem  < handle
                     name_in_use= true;
                 else
                     error("Auxilliary state name '%s' already exists in the system.", name);
+                end
+            end
+        end
+
+        function keep_dof_ = getUsedPositionalStates(obj)
+            if isempty(obj.keep_dof)
+                eom_ = obj.getEOM();
+                % we need to remove the diff so as not to find the
+                % functions inside them
+                dummy = @(y) sym('dummy');
+                eom_ = mapSymType(eom_, 'diff', dummy);
+                outs= struct2array(obj.outputs);
+                if isempty(outs)
+                    time_funs = findSymType(eom_, 'symfun');
+                else
+                    outs = mapSymType(outs, 'diff', dummy);
+                    time_funs = [findSymType(eom_, 'symfun') findSymType(outs, 'symfun')];
+                end
+
+                keep_dof_ = true(length(obj.q), 1);
+                for i = 1:length(obj.q)
+                    if ~ismember(obj.q(i), time_funs)
+                        keep_dof_(i) = false;
+                    end
+                end
+                obj.keep_dof = keep_dof_;
+            else
+                keep_dof_ = obj.keep_dof;
+            end
+        end
+
+        function checkAuxODEFirstOrder(obj)
+            obj.checkSetupCompleted()
+            if isempty(obj.aux_ode_first_order)
+                % get all derivatives in the aux ODEs
+                derivs_aux = findSymType(obj.aux_impl_ode, 'diff');
+                % for each check if it is of an aux state and if yes the order
+                for i = 1:length(derivs_aux)
+                    c = children(derivs_aux(i));
+                    % derivatimes should be only of individual time dependent
+                    % functions, these are then the first child of diff
+                    if ismember(c{1}, struct2array(obj.aux_state))
+                        % for now assume, all diffs are of time only, thus the
+                        % number of children determines the order
+                        if length(c)>2
+                            obj.aux_ode_first_order = false;
+                            error('One or more auxilliary ODEs is not of first order.')
+                        end
+                    end
+                end
+                obj.aux_ode_first_order = true;
+            else
+                if ~obj.aux_ode_first_order
+                    error('One or more auxilliary ODEs is not of first order.')
                 end
             end
         end

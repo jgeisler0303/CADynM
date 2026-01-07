@@ -1,0 +1,166 @@
+{{ fprintf("%% Multibody system: %s", temp_data.Name); }}
+
+function [model, index_name]= {{ fprintf("%s", temp_data.Name); }}_acados(param)
+
+import casadi.*
+
+model = AcadosModel();
+
+% system parameters
+stateName= {
+{{
+    n = temp_data.getStateNames(true);
+    for i = 1:length(n)
+        fprintf('    ''%s''\n', n{i});
+    end
+}}};
+makeCasADiNamedVector('sym_x', stateName, [], 1, 0);
+
+dot_stateName= {
+{{
+    n = temp_data.getDStateNames(true);
+    for i = 1:length(n)
+        fprintf('    ''%s''\n', n{i});
+    end
+}}};
+makeCasADiNamedVector('sym_xdot', dot_stateName, [], 1, 0);
+
+inputName= {
+{{
+    for i = 1:temp_data.getNumIn()
+        fprintf('    ''%s''\n', temp_data.getInName(i));
+    end
+}}};
+makeCasADiNamedVector('sym_u', inputName, [], 1, 0);
+u= sym_u;
+
+% Parameters
+paramName= struct();
+{{ 
+for i = 1:temp_data.getNumParams()
+    param = temp_data.getParamName(i);
+    dims = temp_data.params.getDims(param);
+    if prod(dims)==1
+        fprintf('paramName.%s= 1;\n', param);
+    else
+        fprintf('paramName.%s= %d*%d;\n', param, dims(1), dims(2));
+    end
+end
+}}
+makeCasADiNamedVector('sym_p', paramName, [], 1, 0);
+
+
+% external equations
+externalNames= {
+{{
+    for i = 1:temp_data.getNumExternals()
+        fprintf('    ''%s''\n', temp_data.getExternalName(i));
+    end
+}}};
+makeCasADiNamedVector('externals', externalNames, [], 1, 0);
+
+{{ fprintf("%s", temp_data.Name); }}_acados_external;
+    
+
+% implicit second order model
+{{
+    f_impl = temp_data.replaceVars(temp_data.getImplStateSpaceODE(true));
+    
+    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', f_impl);
+    opt = opt(1);
+    for i = 1:length(tnames)
+        printAssignC('', char(tnames(i)), tvalues(i), 'scalar')
+    end
+    if ~isempty(tnames), fprintf("\n"); end
+    
+    printAssignC(0, 'f', opt, 'numbered')
+    
+    fprintf('\n%% Implicit Nonlinear State-Space Model\n')
+    fprintf('f_impl_expr= [');
+    for i = 1:length(f_impl)
+        if i~=1
+            fprintf(', ')
+        end
+        fprintf('f%d', i)    
+    end
+    fprintf(']'';\n');
+}}
+
+% Outputs
+{{ 
+    y = temp_data.replaceVars(struct2array(temp_data.outputs));
+    
+    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', y);
+    opt = opt(1);
+    for i = 1:length(tnames)
+        printAssignC('', char(tnames(i)), tvalues(i), 'scalar')
+    end
+    if ~isempty(tnames), fprintf("\n"); end
+    
+    printAssignC(0, 'sym_y', opt, 'numbered')
+    
+    fprintf('\nsym_y= [');
+    for i = 1:length(y)
+        if i~=1
+            fprintf(', ')
+        end
+        fprintf('sym_y%d', i)    
+    end
+    fprintf(']'';\n');
+}}
+
+% populate structure
+model.name= mfilename;
+model.u = sym_u;
+model.x = sym_x;
+model.xdot = sym_xdot;
+model.p = sym_p;
+model.f_impl_expr = f_impl_expr;
+
+end
+
+
+function model= makeCasADiNamedVector(vec_name, names, model, unpack, uses_sx)
+if ~exist('unpack', 'var')
+    unpack= false;
+end
+
+if isstruct(names)
+    s= names;
+    names= fieldnames(s);
+    sizes= zeros(size(names));
+    for i= 1:length(names)
+        sizes(i)= s.(names{i});
+    end
+else
+    sizes= ones(size(names));
+end
+
+n= sum(sizes);
+model.([vec_name '_names'])= names;
+model.([vec_name '_sizes'])= sizes;
+model.([vec_name '_indices'])= [0; cumsum(sizes(1:end-1))];
+
+model.(['n' vec_name])= n;
+if unpack, assignin('caller', ['n' vec_name], n); end
+if exist('uses_sx', 'var') && uses_sx
+    model.(vec_name)= casadi.SX.sym(vec_name, n);
+else
+    model.(vec_name)= casadi.MX.sym(vec_name, n);
+end
+if unpack, assignin('caller', vec_name, model.(vec_name)); end
+
+for i= 1:length(names)
+    idx= sum(sizes(1:i-1))+1;
+    model.(['i' vec_name '_' names{i}])= idx;
+    if unpack, evalin('caller', sprintf('i%s_%s= %d;', vec_name, names{i}, i)); end
+    
+    model.([vec_name '_by_name']).(names{i})= model.(vec_name)((1:sizes(i))+idx-1);
+    if unpack, evalin('caller', sprintf('%s= %s(%d:%d);', names{i}, vec_name, idx, idx+sizes(i)-1)); end
+end
+
+end
+
+function p= pow(b, e)
+p= b^e;
+end

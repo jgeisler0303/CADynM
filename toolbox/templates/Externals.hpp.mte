@@ -1,0 +1,19 @@
+void {{ fprintf("%s", temp_data.Name); }}::calculateExternal() {
+{{ 
+for i = 1:temp_data.getNumExternals()
+    fprintf('    %s = 0.0;\n', temp_data.getExternalName(i));
+end
+}}}
+
+void {{ fprintf("%s", temp_data.Name); }}::calculateExternalWithDeriv() {
+{{ 
+for i = 1:temp_data.getNumExternals()
+    fprintf('    %s = 0.0;\n', temp_data.getExternalName(i));
+end
+for i = 1:temp_data.getNumExternals()
+    d = temp_data.getExternalDerivs(i);
+    for j = 1:length(d)
+        fprintf('    %s = 0.0;\n', d{j});
+    end
+end
+}}}

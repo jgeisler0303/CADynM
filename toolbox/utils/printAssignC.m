@@ -19,6 +19,8 @@ for i = 1:m
     for j = 1:n
         if ~selector(var(i, j)), continue, end
         switch type
+            case 'numbered'
+                index = sprintf('%d', i+(j-1)*m);
             case 'scalar'
                 index = '';
             case 'vector'

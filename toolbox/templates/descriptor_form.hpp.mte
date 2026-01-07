@@ -10,28 +10,57 @@
 #include <ctime>
 #include <array>
 
-#include "NewmarkBeta.hpp"
 typedef double real_type;
 
 #include "{{ fprintf('%s_param.hpp', temp_data.Name); }}"
 
-class {{ fprintf('%s: public NewmarkBeta<%d, %d, %d, real_type>', temp_data.Name, temp_data.getNumDOF()+temp_data.getNumAux(), temp_data.getNumIn(), temp_data.getNumOut()); }} {
+
+class {{ fprintf("%s", temp_data.Name); }} {
 public:
-    {{ fprintf('%s', temp_data.Name); }}();
+    typedef Eigen::Matrix<real_type, {{ fprintf('%d', temp_data.getNumDOF); }}, 1> VecQ;
+    typedef Eigen::Matrix<real_type, {{ fprintf('%d', temp_data.getNumIn); }}, 1> VecI;
+    typedef Eigen::Matrix<real_type, {{ fprintf('%d', temp_data.getNumOut); }}, 1> VecO;
+    typedef Eigen::Matrix<real_type, {{ fprintf('%d, %d', temp_data.getNumDOF, temp_data.getNumDOF); }}> MatQ;
+    typedef Eigen::Matrix<real_type, {{ fprintf('%d, %d', temp_data.getNumDOF, temp_data.getNumIn); }}> MatQI;
+    typedef Eigen::Matrix<real_type, {{ fprintf('%d, %d', temp_data.getNumOut, temp_data.getNumDOF); }}> MatOQ;
+    typedef Eigen::Matrix<real_type, {{ fprintf('%d, %d', temp_data.getNumOut, 2*temp_data.getNumDOF+temp_data.getNumIn); }}> MatCD;
+    typedef Eigen::Matrix<real_type, {{ fprintf('%d, %d', 2*temp_data.getNumDOF, 2*temp_data.getNumDOF); }}> Mat2Q;
+    typedef Eigen::Matrix<real_type, {{ fprintf('%d, %d', 2*temp_data.getNumDOF, 2*temp_data.getNumDOF+temp_data.getNumIn); }}> MatS;
+    
+    {{ fprintf("%s", temp_data.Name); }}();
         
     void precalcConsts();
-    virtual VecQ computeResiduals();
-    virtual void calcJacobian(real_type alphaM, real_type alphaC, real_type alphaK);
-    virtual void calcB();
-    virtual void calcCDF();
-    virtual void calcOut();
+    void calcMf();
+    void calcJacobian();
+    void calcB();
+    void calcCDF();
+    void calcOut();
 {{ 
 if temp_data.getNumExternals() > 0
     fprintf('    void calculateExternal();\n');
     fprintf('    void calculateExternalWithDeriv();\n');
 end
 }}
+    
     {{ fprintf('%sParameters param;', temp_data.Name); }}
+    
+// private:
+    static constexpr int nbrdof = {{ fprintf('%d', temp_data.getNumDOF); }};
+    static constexpr int nbrout = {{ fprintf('%d', temp_data.getNumOut); }};
+    static constexpr int nbrin = {{ fprintf('%d', temp_data.getNumIn); }};
+    std::array<std::string, nbrdof> state_name;
+    std::array<std::string, nbrin> in_name;
+    VecQ f;
+    MatQ M;
+    MatOQ F;
+    MatQI B;
+    MatQ K;
+    MatQ C;
+    MatCD CD;
+    VecQ q, qd, qdd;
+    VecI u;
+    VecO y;
+
 {{ 
 % Inputs struct
 fprintf('    struct inputs_t {\n');
@@ -147,6 +176,7 @@ fprintf('    } outputs_idx_type;\n');
     static const states_idx_type states_idx;
     static const inputs_idx_type inputs_idx;
     static const outputs_idx_type outputs_idx;
+    
 {{ 
 for i = 1:temp_data.getNumExternals()
     fprintf('\n    real_type %s;\n', temp_data.getExternalName(i));
@@ -194,8 +224,9 @@ end
 fprintf('};\n');
 }}
 
-{{ fprintf('%s::%s() : \n    NewmarkBeta("%s", "%s"),\n    param()', temp_data.Name, temp_data.Name, temp_data.Name, temp_data.Name); }}{{ 
-fprintf(',\n    inputs(');
+{{ fprintf("%s", temp_data.Name); }}::{{ fprintf("%s", temp_data.Name); }}() : 
+    param(),
+{{fprintf('    inputs(');
 for i = 1:temp_data.getNumIn()
     fprintf('u.data()[%d]', i-1);
     if i ~= temp_data.getNumIn()
@@ -267,33 +298,46 @@ void {{ fprintf("%s", temp_data.Name); }}::precalcConsts() {
     printAssignC(4, 'F', F, 'matrix', const_selector)
 }}}
 
-{{ fprintf("%s", temp_data.Name); }}::VecQ 
-{{ fprintf("%s", temp_data.Name); }}::computeResiduals() {
-    VecQ f_;
-
+void {{ fprintf("%s", temp_data.Name); }}::calcMf() {
 {{ 
     if temp_data.getNumExternals() > 0
+        fprintf("    // TODO: check if it is possible that externals enter teh mass matrix\n");        
         fprintf("    calculateExternal();\n");
     end
 }}
     {
 {{
-    eom = temp_data.replaceVars(temp_data.getEOM(true), 'cpp');
-    
-    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', eom);
+    not_const_selector = @(e)~temp_data.isConstant(e, 'cpp');
+
+    eom =  temp_data.getEOM(true);
+    [eom, vars] = temp_data.replaceVars(eom, 'cpp');
+    M  = temp_data.replaceVars(temp_data.getM(true), 'cpp');
+    f_ = M*vars.qdd - eom;
+
+    n_dof_aux = temp_data.getNumDOF()+temp_data.getNumAux();
+    for i = 1:n_dof_aux
+        for j = 1:n_dof_aux
+            if ~not_const_selector(M(i, j))
+                M(i, j) = 0; % constant elements dont need to be optimized
+            end
+        end
+    end
+
+    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', [f_ M]);
     opt = opt(1);
     for i = 1:length(tnames)
         printAssignC('        real_type ', char(tnames(i)), tvalues(i), 'scalar')
     end
     if ~isempty(tnames), fprintf("\n"); end
     
-    printAssignC(8, 'f_', opt, 'vector_par')
+    n = printAssignC(8, 'M', opt(:, (1:n_dof_aux)+1), 'matrix', not_const_selector);
+    if n>0, fprintf("\n"); end
+        
+    printAssignC(8, 'f', opt(:, 1), 'vector_par')
 }}    }
-
-    return f_;
 }
 
-void {{ fprintf("%s", temp_data.Name); }}::calcJacobian(real_type alphaM, real_type alphaC, real_type alphaK) {
+void {{ fprintf("%s", temp_data.Name); }}::calcJacobian() {
 {{ 
     if temp_data.getNumExternals() > 0
         fprintf("    calculateExternalWithDeriv();\n");
@@ -303,17 +347,12 @@ void {{ fprintf("%s", temp_data.Name); }}::calcJacobian(real_type alphaM, real_t
 {{ 
     not_const_selector = @(e)~temp_data.isConstant(e, 'cpp');
     
-    eom = temp_data.replaceVars(temp_data.getEOM(true), 'cpp');
-    M = temp_data.replaceVars(temp_data.getM(true), 'cpp');
     C = temp_data.replaceVars(temp_data.getC(true), 'cpp');
     K = temp_data.replaceVars(temp_data.getK(true), 'cpp');
     
     n_dof_aux = temp_data.getNumDOF()+temp_data.getNumAux();
     for i = 1:n_dof_aux
         for j = 1:n_dof_aux
-            if ~not_const_selector(M(i, j))
-                M(i, j) = 0; % constant elements dont need to be optimized
-            end
             if ~not_const_selector(C(i, j))
                 C(i, j) = 0; % constant elements dont need to be optimized
             end
@@ -323,33 +362,17 @@ void {{ fprintf("%s", temp_data.Name); }}::calcJacobian(real_type alphaM, real_t
         end
     end
 
-    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', [eom M C K]);
+    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', [C K]);
     opt = opt(1);
     for i = 1:length(tnames)
         printAssignC('        real_type ', char(tnames(i)), tvalues(i), 'scalar')
     end
     if ~isempty(tnames), fprintf("\n"); end
         
-    n = printAssignC(8, 'M', opt(:, (1:n_dof_aux)+1), 'matrix', not_const_selector);
+    n = printAssignC(8, 'C', opt(:, (1:n_dof_aux)), 'matrix', not_const_selector);
     if n>0, fprintf("\n"); end
-    n = printAssignC(8, 'C', opt(:, (1:n_dof_aux)+1+n_dof_aux), 'matrix', not_const_selector);
-    if n>0, fprintf("\n"); end
-    n = printAssignC(8, 'K', opt(:, (1:n_dof_aux)+1+2*n_dof_aux), 'matrix', not_const_selector);
-    if n>0, fprintf("\n"); end
-
-    printAssignC(8, 'f', opt(:, 1), 'vector_par')
+    n = printAssignC(8, 'K', opt(:, (1:n_dof_aux)+n_dof_aux), 'matrix', not_const_selector);
 }}    }
-    
-    Jacobian = alphaM*M + alphaC*C + alphaK*K;
-
-    for(int idof = 0; idof < nbrdof; idof++) {
-        if(doflocked[idof]) {
-            f[idof] = 0.0;
-            Jacobian.col(idof).setZero();
-            Jacobian.row(idof).setZero();
-            Jacobian(idof, idof) = 1.0;
-        }
-    }
 }
 
 void {{ fprintf("%s", temp_data.Name); }}::calcB() {
