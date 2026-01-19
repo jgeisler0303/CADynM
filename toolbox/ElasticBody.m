@@ -21,9 +21,7 @@ classdef ElasticBody  < Body
             if ~isempty(eDOF) && length(eDOF)~=obj.sid.nelastq
                 error('Number of elastic DOF (%d) and DOF in SID (%d) must match.', length(eDOF), sid.nelastq)
             end
-            for i = 1:length(eDOF)
-                obj.ElasticDOF(i) = eDOF;
-            end
+            obj.ElasticDOF = eDOF;
 
             if nargin > 2
                 obj.Name = name;
@@ -105,7 +103,7 @@ classdef ElasticBody  < Body
                 iframe = length(obj.sid.frame);
             end
             
-            obj.system.obj.checkSetupCompleted()
+            obj.system.checkSetupCompleted()
 
             r_rel = obj.sid.frame(iframe).origin.evalTaylor(obj.ElasticDOF, obj.sym_eps);
             v_rel = diff(r_rel, obj.system.time);
@@ -200,6 +198,10 @@ classdef ElasticBody  < Body
                     obj.Fe(ief) = obj.Fe(ief) - D(ief, jef) * eDOF_d(jef)*obj.sym_eps;          % eps?
                 end
             end
+
+            obj.F = Body.removeEps(obj.F, true);
+            obj.M = Body.removeEps(obj.M, true);
+            obj.Fe = Body.removeEps(obj.Fe, true);
         end
 
         function calcGenForce(obj)
@@ -219,13 +221,13 @@ classdef ElasticBody  < Body
                 if ~isempty(obj.ConstrLoads)
                     constr_forces = obj.system.getConstraintForce(obj.ConstrLoads{i}, false);
                     for j = 1:length(obj.ElasticDOF)
-                        % TODO: check if M0 needs to be considered
-                        % (probably)
+                        % M0 is already considered by the coupling of bodies via T_elast
                         e_force = squeeze(obj.sid.frame(obj.ChildFrame(i)).phi.M1(:, :, j))' *constr_forces;
                         obj.Fe = obj.Fe + e_force*obj.ElasticDOF(j)*obj.sym_eps;
                     end
                 end
             end
+            obj.Fe = Body.removeEps(obj.Fe, true);
         end
     end
 end

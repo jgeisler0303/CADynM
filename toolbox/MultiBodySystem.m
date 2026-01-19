@@ -75,9 +75,9 @@ classdef MultiBodySystem  < handle
             obj.checkName(coordName)
     
             % Define symbolic variable dynamically
-            % symFun = symfun(str2sym([coordName '(time)']), obj.time);
+            save_assumptions = assumptions;
             symFun = str2sym([coordName '(time)']);
-            assume(obj.time, 'real') % str2sym deletes the original assumptions
+            assumptions(save_assumptions); % str2sym deletes old assumtions
             assumeAlso(symFun, 'real')
     
             % Store it
@@ -108,9 +108,9 @@ classdef MultiBodySystem  < handle
             obj.checkName(coordName)
     
             % Define symbolic variable dynamically
-            % symFun = symfun(str2sym([coordName '(time)']), obj.time);
+            save_assumptions = assumptions;
             symFun = str2sym([coordName '(time)']);
-            assume(obj.time, 'real') % str2sym deletes the original assumptions
+            assumptions(save_assumptions); % str2sym deletes the original assumptions
             assumeAlso(symFun, 'real')
 
             % Store it
@@ -207,10 +207,10 @@ classdef MultiBodySystem  < handle
                 outName { mustBeTextScalar }
                 expr (1,1) sym
             end
-
-            obj.checkSetupNotCompleted();
-            obj.checkName(outName)
-
+            
+            if isfield(obj.outputs, outName)
+                error('Output "%s" already defined.', outName)
+            end
             obj.outputs.(outName) = expr;
         end
 
@@ -229,8 +229,9 @@ classdef MultiBodySystem  < handle
             if isempty(depends)
                 symFun = sym(extName, 'real');
             else
+                save_assumptions = assumptions;
                 symFun = str2sym(string(extName) + "(" + join(string(depends), ',') + ")");
-                assume(depends, 'real') % str2sym deletes the original assumptions
+                assumptions(save_assumptions); % str2sym deletes the original assumptions
                 assumeAlso(symFun, 'real')
             end
     
@@ -256,8 +257,9 @@ classdef MultiBodySystem  < handle
             obj.checkName(auxName)
     
             % Define symbolic variable dynamically
+            save_assumptions = assumptions;
             symFun = str2sym([auxName '(time)']);
-            assume(obj.time, 'real') % str2sym deletes the original assumptions
+            assumptions(save_assumptions); % str2sym deletes the original assumptions
             assumeAlso(symFun, 'real')
 
             % Store it
@@ -781,11 +783,11 @@ classdef MultiBodySystem  < handle
             end
 
             for i = 1:length(obj.q)
+                save_assumptions = assumptions;
                 x1(i, 1) = symfun(str2sym(sprintf('x1_%d(time)', i)), obj.time);
-                assume(obj.time, 'real') % str2sym deletes the original assumptions
-                assumeAlso(x1(i, 1), 'real')
                 x2(i, 1) = symfun(str2sym(sprintf('x2_%d(time)', i)), obj.time);
-                assume(obj.time, 'real') % str2sym deletes the original assumptions
+                assumptions(save_assumptions); % str2sym deletes the original assumptions
+                assumeAlso(x1(i, 1), 'real')
                 assumeAlso(x2(i, 1), 'real')
             end
             x = [x1 ; x2; struct2array(obj.aux_state)];
@@ -809,6 +811,7 @@ classdef MultiBodySystem  < handle
                 e (:,:) sym
                 naming {mustBeText} = 'real_name'
             end
+            % TODO: save assumptions here too?
             vars.qdd = str2sym(obj.getQddName([], naming));
             assume(vars.qdd, 'real')
             vars.qd = str2sym(obj.getQdName([], naming));
@@ -845,6 +848,7 @@ classdef MultiBodySystem  < handle
             ext_d = cell(size(exts));
             for i = 1:length(exts)
                 partial_names = obj.getExternalDerivs(i, naming);
+                % TODO: save assumptions here too?
                 partial_syms = str2sym(partial_names);
                 assume(partial_syms, 'real')
                 deps = obj.external_deps.(ext_names{i});
@@ -864,6 +868,7 @@ classdef MultiBodySystem  < handle
             vars.ext = ext_vars;
             vars.ext_d = ext_d;
 
+            % TODO: save_assumptions here too?
             vars.u = str2sym(obj.getInName([], naming));
             assume(vars.u, 'real')
             vars.p = str2sym(obj.getParamName([], naming));

@@ -104,17 +104,17 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function abs_accel = getA0(obj, r_rel, v_rel, a_rel)
             arguments
                 obj 
-                r_rel (3, 1) {mustBeNumericOrSym} 
-                v_rel (3, 1) {mustBeNumericOrSym} 
-                a_rel (3, 1) {mustBeNumericOrSym} 
+                r_rel (3, 1) {Body.mustBeNumericOrSym} 
+                v_rel (3, 1) {Body.mustBeNumericOrSym} 
+                a_rel (3, 1) {Body.mustBeNumericOrSym} 
             end
-            obj.system.obj.checkSetupCompleted()
+            obj.system.checkSetupCompleted()
 
             r_abs = obj.T0(1:3, 1:3) * r_rel;
             v_abs = obj.T0(1:3, 1:3) * v_rel;
             a_abs = obj.T0(1:3, 1:3) * a_rel;
         
-            abs_accel = simplify(obj.a0 + crossmat(obj.alpha0)*r_abs + crossmat(obj.omega0)*(crossmat(obj.omega0)*r_abs) + 2.0*crossmat(obj.omega0)*v_abs + a_abs);
+            abs_accel = simplify(obj.a0 + crossmat(obj.alpha0)*r_abs + crossmat(obj.omega0)*(crossmat(obj.omega0)*r_abs) + 2*crossmat(obj.omega0)*v_abs + a_abs);
         end
 
         % calculate kinematics
@@ -127,24 +127,29 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             obj.a0= diff(obj.v0, obj.system.time);
 
             w_skew= simplify(diff(obj.T0(1:3, 1:3), obj.system.time)*obj.T0(1:3, 1:3).');
-            obj.omega0= [[0 0 1]*w_skew*[0 1 0]'; [1 0 0]*w_skew*[0 0 1]'; [0 1 0]*w_skew*[1 0 0]'];
+            obj.omega0= [(w_skew(3, 2)-w_skew(2, 3))/sym(2); (w_skew(1, 3)-w_skew(3, 1))/sym(2); (w_skew(2, 1)-w_skew(1, 2))/sym(2)];
+            obj.omega0= simplify(obj.removeEps(obj.omega0, true));
             % store with and remove movement inconstraint directions
             obj.omega0_z= obj.omega0;
             obj.omega0 = subs(obj.omega0, obj.system.z, zeros(size(obj.system.z)));
-            
+
             obj.alpha0= diff(obj.omega0, obj.system.time);
 
             % Partial velocities
             % TODO: add explanation, why eps is removed here
-            obj.v_p= subs(jacobian(obj.v0, diff(obj.system.q, obj.system.time)), obj.sym_eps, 1);
-            obj.omega_p= subs(jacobian(obj.omega0, diff(obj.system.q, obj.system.time)), obj.sym_eps, 1);
-            obj.vz_p= subs(jacobian(obj.v0_z, diff(obj.system.z, obj.system.time)), obj.sym_eps, 1);
-            obj.omegaz_p= subs(jacobian(obj.omega0_z, diff(obj.system.z, obj.system.time)), obj.sym_eps, 1);
+            obj.v_p= simplify(subs(jacobian(obj.v0, diff(obj.system.q, obj.system.time)), [obj.sym_eps, obj.sym_eps_rot], [1, 1]));
+            obj.omega_p= simplify(subs(jacobian(obj.omega0, diff(obj.system.q, obj.system.time)), [obj.sym_eps, obj.sym_eps_rot], [1, 1]));
+            obj.vz_p= subs(jacobian(obj.v0_z, diff(obj.system.z, obj.system.time)), [obj.sym_eps, obj.sym_eps_rot], [1, 1]);
+            obj.vz_p= simplify(subs(obj.vz_p, obj.system.z, zeros(size(obj.system.z))));
+            obj.omegaz_p= subs(jacobian(obj.omega0_z, diff(obj.system.z, obj.system.time)), [obj.sym_eps, obj.sym_eps_rot], [1, 1]);
+            obj.omegaz_p= simplify(subs(obj.omegaz_p, obj.system.z, zeros(size(obj.system.z))));
 
             for i= 1:length(obj.children)
                 obj.children(i).T0= obj.T0 * obj.children(i).T;
                 obj.children(i).prepareKinematics;
             end
+
+            obj.T0= subs(obj.T0, obj.system.z, zeros(size(obj.system.z)));
         end
 
         function prepareForces(obj)
@@ -264,6 +269,18 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
     methods (Static)
         % Rodrigues' formula for rotation matrix and wrap into 4x4
         function T = rotationMatrix(axis, angle)
+            if ischar(axis)
+                switch axis
+                    case 'x'
+                        axis = [1 0 0];
+                    case 'y'
+                        axis = [0 1 0];
+                    case 'z'
+                        axis = [0 0 1];
+                    otherwise
+                        error('Unknown rotation axis name "%s".', axis)
+                end
+            end
             x = axis(1); y = axis(2); z = axis(3);
             c = cos(angle);
             s = sin(angle);
@@ -283,17 +300,31 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             end
         end
 
-        function expr = removeEps(expr)
+        function expr = removeEps(expr, keep_symbols)
+            arguments
+                expr 
+                keep_symbols (1,1) logical = false
+            end
             % remove small rotations
             % TODO: why not also second order terms?
             for i = 1:length(expr)
                 coeff_rot= coeffs(expr(i), Body.sym_eps_rot, 'All');
                 switch length(coeff_rot)
                     case {0,1} % empty or no terms with eps_rot, nothing to do
-                    case {2,3} % only first and second order terms
-                        expr(i) = sum(coeff_rot); % eliminate eps_rot, same as subs(..., sym('eps_rot'), 1)
-                    otherwise % also higher oder terms
-                        expr(i) = sum(coeff_rot(end-2:end)); % remove higher order terms and eliminate eps_rot
+                    % only first and second order terms
+                    % case 2
+                    %     if keep_symbols
+                    %         expr(i) = coeff_rot(1)*Body.sym_eps_rot + coeff_rot(2);
+                    %     else
+                    %         expr(i) = sum(coeff_rot); % eliminate eps_rot, same as subs(..., sym('eps_rot'), 1)
+                    %     end
+                    otherwise
+                        if keep_symbols
+                            expr(i) = coeff_rot(end-1)*Body.sym_eps_rot + coeff_rot(end);
+                            % expr(i) = coeff_rot(end-2)*Body.sym_eps_rot^2 + coeff_rot(end-1)*Body.sym_eps_rot + coeff_rot(end);
+                        else
+                            expr(i) = sum(coeff_rot(end-1:end)); % eliminate eps_rot, same as subs(..., sym('eps_rot'), 1)
+                        end
                 end
             end
 
@@ -303,10 +334,13 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 coeff_eps= coeffs(expr(i), Body.sym_eps, 'All');
                 switch length(coeff_eps)
                     case {0,1} % empty or no terms with eps, nothing to do
-                    case 2 % only first order terms
-                        expr(i) = sum(coeff_eps); % eliminate eps, same as subs(..., sym('eps'), 1)
+                    % only first order terms
                     otherwise % also higher oder terms
-                        expr(i) = sum(coeff_eps(end-1:end)); % remove higher order terms and eliminate eps
+                        if keep_symbols
+                            expr(i) = coeff_eps(end-1)*Body.sym_eps + coeff_eps(end);
+                        else
+                            expr(i) = sum(coeff_eps(end-1:end)); % eliminate eps, same as subs(..., sym('eps'), 1)
+                        end
                 end
             end
             

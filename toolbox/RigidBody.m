@@ -37,6 +37,9 @@ classdef RigidBody  < Body
             PhiG_global = rotationToGlobal * Phi * rotationToLocal;
 
             obj.M = -PhiG_global * obj.alpha0 - crossmat(obj.omega0) * (PhiG_global * obj.omega0);
+
+            obj.F = Body.removeEps(obj.F, true);
+            obj.M = Body.removeEps(obj.M, true);            
         end
 
         function vars = collectVars(obj)
