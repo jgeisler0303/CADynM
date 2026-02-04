@@ -45,6 +45,8 @@ classdef MultiBodySystem  < handle
     methods
         % Constructor with optional name
         function obj = MultiBodySystem(name, dof, input)
+            addpath(fullfile(fileparts(mfilename("fullpath")), '..', '..', 'MAMaS'));
+
             obj.params = Parameters();
             if nargin > 0
                 obj.Name = string(name);
@@ -650,14 +652,14 @@ classdef MultiBodySystem  < handle
             tf = all(ismember(string(syms_in_expr), constants_list));
         end
 
-        function [partial_names, deps, dep_names] = getExternalDerivs(obj, i, naming)
+        function [partial_names, deps, dep_names] = getExternalDerivs(obj, i, ~)
             fn = fieldnames(obj.externals);
             n = fn{i};
             deps = obj.external_deps.(n);
             dep_names = obj.replaceDOFs(deps);
             partial_names = cell(1, length(deps));
-            for i = 1:length(deps)
-                partial_names{i} = ['d' n '_d' char(dep_names(i))];
+            for j = 1:length(deps)
+                partial_names{j} = ['d' n '_d' char(dep_names(j))];
             end
         end
 
@@ -675,8 +677,7 @@ classdef MultiBodySystem  < handle
                     eom_ = eom_ + obj.attached_bodies(i).collectGenForces;
                 end
     
-                eom_ = simplify(eom_, 'Steps', 50);
-                eom_ = collect(eom_, struct2array(obj.dof));
+                eom_ = simplify(eom_);
                 obj.eom = eom_;
             end
             if with_aux

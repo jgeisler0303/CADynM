@@ -306,44 +306,17 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 keep_symbols (1,1) logical = false
             end
             % remove small rotations
-            % TODO: why not also second order terms?
-            for i = 1:length(expr)
-                coeff_rot= coeffs(expr(i), Body.sym_eps_rot, 'All');
-                switch length(coeff_rot)
-                    case {0,1} % empty or no terms with eps_rot, nothing to do
-                    % only first and second order terms
-                    % case 2
-                    %     if keep_symbols
-                    %         expr(i) = coeff_rot(1)*Body.sym_eps_rot + coeff_rot(2);
-                    %     else
-                    %         expr(i) = sum(coeff_rot); % eliminate eps_rot, same as subs(..., sym('eps_rot'), 1)
-                    %     end
-                    otherwise
-                        if keep_symbols
-                            expr(i) = coeff_rot(end-1)*Body.sym_eps_rot + coeff_rot(end);
-                            % expr(i) = coeff_rot(end-2)*Body.sym_eps_rot^2 + coeff_rot(end-1)*Body.sym_eps_rot + coeff_rot(end);
-                        else
-                            expr(i) = sum(coeff_rot(end-1:end)); % eliminate eps_rot, same as subs(..., sym('eps_rot'), 1)
-                        end
-                end
+            expr = expr.subst(Body.sym_eps_rot^2, 0, true);
+            if ~keep_symbols
+                expr = expr.subst(Body.sym_eps_rot, 0);
             end
 
             % remove cross terms of small elastic terms
-            % TODO: add reference why only first order terms are kept
-            for i = 1:length(expr)
-                coeff_eps= coeffs(expr(i), Body.sym_eps, 'All');
-                switch length(coeff_eps)
-                    case {0,1} % empty or no terms with eps, nothing to do
-                    % only first order terms
-                    otherwise % also higher oder terms
-                        if keep_symbols
-                            expr(i) = coeff_eps(end-1)*Body.sym_eps + coeff_eps(end);
-                        else
-                            expr(i) = sum(coeff_eps(end-1:end)); % eliminate eps, same as subs(..., sym('eps'), 1)
-                        end
-                end
+            expr = expr.subst(Body.sym_eps^2, 0, true);
+            if ~keep_symbols
+                expr = expr.subst(Body.sym_eps, 0);
             end
-            
+
             % TODO: what about eps*eps_rot cross terms?
         end
     end
