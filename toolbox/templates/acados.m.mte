@@ -59,13 +59,16 @@ externalNames= {
 }}};
 makeCasADiNamedVector('externals', externalNames, [], 1, 0);
 
-{{ fprintf("%s", temp_data.Name); }}_acados_external;
-    
+{{
+    if temp_data.getNumExternals()~=0
+        fprintf("%s_acados_external;", temp_data.Name);
+    end
+}}
 
 % implicit second order model
 {{
     f_impl = temp_data.replaceVars(temp_data.getImplStateSpaceODE(true));
-    
+
     [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', f_impl);
     opt = opt(1);
     for i = 1:length(tnames)
