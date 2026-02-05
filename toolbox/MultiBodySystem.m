@@ -418,7 +418,7 @@ classdef MultiBodySystem  < handle
                 case 'cpp'
                     n = sprintfc('q_IDX%dXDI_', i-1)';
             end
-            if isscalar(n)
+            if nargin>1 && isscalar(i)
                 n = n{1};
             end
         end
@@ -833,7 +833,7 @@ classdef MultiBodySystem  < handle
 
             e = subs(e, obj.getTimeDeriv(struct2array(obj.aux_state), 2), vars.auxdd);
             e = subs(e, obj.getTimeDeriv(struct2array(obj.aux_state), 1), vars.auxd);
-            e = subs(e, struct2array(obj.aux_state), vars.aux);
+            e = subs(e, struct2array(obj.aux_state)', vars.aux);
         end
 
         function [e, vars] = replaceVars(obj, e, naming)
