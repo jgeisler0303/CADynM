@@ -199,9 +199,9 @@ classdef ElasticBody  < Body
                 end
             end
 
-            obj.F = Body.removeEps(obj.F, obj.system.sym_eps, obj.system.sym_eps_rot, true);
-            obj.M = Body.removeEps(obj.M, obj.system.sym_eps, obj.system.sym_eps_rot, true);
-            obj.Fe = Body.removeEps(obj.Fe, obj.system.sym_eps, obj.system.sym_eps_rot, true);
+            obj.F = obj.system.removeEps(obj.F, true);
+            obj.M = obj.system.removeEps(obj.M, true);
+            obj.Fe = obj.system.removeEps(obj.Fe, true);
         end
 
         function calcGenForce(obj)
@@ -227,7 +227,7 @@ classdef ElasticBody  < Body
                     end
                 end
             end
-            obj.Fe = Body.removeEps(obj.Fe, obj.system.sym_eps, obj.system.sym_eps_rot, true);
+            obj.Fe = obj.system.removeEps(obj.Fe, true);
         end
     end
 end

@@ -35,12 +35,17 @@ for i = 1:m
 
         code_str = ccode(var(i, j));
         pos = strfind(code_str, '=');
-        code_str = code_str(pos+1:end); % remove "t0 = "
+        if ~isempty(pos)
+            code_str = code_str(pos+1:end); % remove "t0 = "
+        end
         code_str = strrep(code_str, '_IDX', '(');
         code_str = strrep(code_str, 'XDI_', ')');
         code_str = strrep(code_str, 'PSTRUCT_', 'param.');
-        
-        fprintf('%s%s%s =%s\n', ind, name, index, code_str)
+        if ~endsWith(code_str, ';')
+            fprintf('%s%s%s = %s;\n', ind, name, index, code_str)
+        else
+            fprintf('%s%s%s = %s\n', ind, name, index, code_str)
+        end
         ij = ij+1;
     end
 end

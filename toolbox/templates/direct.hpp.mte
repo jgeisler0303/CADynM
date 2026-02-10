@@ -365,7 +365,7 @@ void {{ fprintf("%s", temp_data.Name); }}::calcB() {
 
     [opt, tnames, tvalues] = optimize(B);
     for i = 1:length(tnames)
-        printAssignC('        real_type ', char(tnames(i)), tvalues(i), 'scalar')
+        printAssignC('    real_type ', char(tnames(i)), tvalues(i), 'scalar')
     end
     if ~isempty(tnames), fprintf("\n"); end
     

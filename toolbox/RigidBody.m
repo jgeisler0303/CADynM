@@ -17,12 +17,14 @@ classdef RigidBody  < Body
             end
             if nargin > 2
                 obj.m = mass;
+            else
+                obj.m = 0;
             end
             if nargin > 3
                 obj.I = inertia;
+            else
+                obj.I = zeros(3,3);
             end
-            obj.m = 0;
-            obj.I = zeros(3,3);
         end
 
         function prepareKinematics(obj)
@@ -40,8 +42,8 @@ classdef RigidBody  < Body
 
             obj.M = -PhiG_global * obj.alpha0 - crossmat(obj.omega0) * (PhiG_global * obj.omega0);
 
-            obj.F = Body.removeEps(obj.F, obj.system.sym_eps, obj.system.sym_eps_rot, true);
-            obj.M = Body.removeEps(obj.M, obj.system.sym_eps, obj.system.sym_eps_rot, true);            
+            obj.F = obj.system.removeEps(obj.F, true);
+            obj.M = obj.system.removeEps(obj.M, true);            
         end
 
         function vars = collectVars(obj)

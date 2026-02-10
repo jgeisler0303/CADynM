@@ -124,16 +124,16 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             obj.v0= diff(obj.T0(1:3, 4), obj.system.time);
             obj.v0_z = obj.v0;
             % store with and remove movement inconstraint directions
-            obj.v0= subs(obj.v0, obj.system.z, zeros(size(obj.system.z)));
+            obj.v0= subs(obj.v0, struct2array(obj.system.doc), 0);
 
             obj.a0= diff(obj.v0, obj.system.time);
 
             w_skew= simplify(diff(obj.T0(1:3, 1:3), obj.system.time)*obj.T0(1:3, 1:3).');
             obj.omega0= [(w_skew(3, 2)-w_skew(2, 3))/msym(2); (w_skew(1, 3)-w_skew(3, 1))/msym(2); (w_skew(2, 1)-w_skew(1, 2))/msym(2)];
-            obj.omega0= simplify(obj.removeEps(obj.omega0, obj.system.sym_eps, obj.system.sym_eps_rot, true));
+            obj.omega0= simplify(obj.system.removeEps(obj.omega0, true));
             % store with and remove movement inconstraint directions
             obj.omega0_z= obj.omega0;
-            obj.omega0 = subs(obj.omega0, obj.system.z, zeros(size(obj.system.z)));
+            obj.omega0 = subs(obj.omega0, struct2array(obj.system.doc), 0);
 
             obj.alpha0= diff(obj.omega0, obj.system.time);
 
@@ -141,17 +141,19 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             % TODO: add explanation, why eps is removed here
             obj.v_p= simplify(subs(jacobian(obj.v0, diff(obj.system.q, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]));
             obj.omega_p= simplify(subs(jacobian(obj.omega0, diff(obj.system.q, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]));
+
             obj.vz_p= subs(jacobian(obj.v0_z, diff(obj.system.z, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]);
-            obj.vz_p= simplify(subs(obj.vz_p, obj.system.z, zeros(size(obj.system.z))));
+            obj.vz_p= simplify(subs(obj.vz_p, struct2array(obj.system.doc), 0));
+
             obj.omegaz_p= subs(jacobian(obj.omega0_z, diff(obj.system.z, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]);
-            obj.omegaz_p= simplify(subs(obj.omegaz_p, obj.system.z, zeros(size(obj.system.z))));
+            obj.omegaz_p= simplify(subs(obj.omegaz_p, struct2array(obj.system.doc), 0));
 
             for i= 1:length(obj.children)
                 obj.children(i).T0= obj.T0 * obj.children(i).T;
                 obj.children(i).prepareKinematics;
             end
 
-            obj.T0= subs(obj.T0, obj.system.z, zeros(size(obj.system.z)));
+            obj.T0= subs(obj.T0, struct2array(obj.system.doc), 0);
         end
 
         function prepareForces(obj)
@@ -176,7 +178,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             end
             obj.calcGenForce();
             
-            obj.Fgen = obj.removeEps(obj.Fgen, obj.system.sym_eps, obj.system.sym_eps_rot);
+            obj.Fgen = obj.system.removeEps(obj.Fgen);
             
             Fgen = obj.Fgen;
             for i= 1:length(obj.children)
@@ -300,28 +302,6 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             if ~(isnumeric(val) || isa(val,'msym'))
                 error('Value must be numeric or symbolic.');
             end
-        end
-
-        function expr = removeEps(expr, sym_eps, sym_eps_rot, keep_symbols)
-            arguments
-                expr
-                sym_eps (1,1) msym
-                sym_eps_rot (1,1) msym
-                keep_symbols (1,1) logical = false
-            end
-            % remove small rotations
-            expr = expr.subs(sym_eps_rot^2, 0, true);
-            if ~keep_symbols
-                expr = expr.subs(sym_eps_rot, 0);
-            end
-
-            % remove cross terms of small elastic terms
-            expr = expr.subs(sym_eps^2, 0, true);
-            if ~keep_symbols
-                expr = expr.subs(sym_eps, 0);
-            end
-
-            % TODO: what about eps*eps_rot cross terms?
         end
     end
 end

@@ -691,7 +691,7 @@ classdef MultiBodySystem  < handle
             else
                 keep_dof_ = true(length(obj.q), 1);
             end
-            
+
             dx1 = msym.empty;
             for i = 1:length(obj.q)
                 % positonal state derivatives
@@ -704,7 +704,12 @@ classdef MultiBodySystem  < handle
             % TODO: check if some auxilliary ODEs are also intgrals
             i_state_idx = [true(sum(keep_dof_), 1); false(length(eom_) + length(obj.aux_impl_ode), 1)];
 
-            f_impl = [dx1(keep_dof_) - obj.getTimeDeriv(obj.q(keep_dof_), 1) ; eom_; obj.aux_impl_ode];
+            % work-aroud for inconsistent MAMaS concatenation rules: create
+            % one msym matrix
+            f_impl = msym.zeros(sum(keep_dof_)+obj.getNumDOF+length(obj.aux_impl_ode), 1);
+            f_impl(1:sum(keep_dof_)) = dx1(keep_dof_) - obj.getTimeDeriv(obj.q(keep_dof_), 1);
+            f_impl((1:obj.getNumDOF)+sum(keep_dof_)) = eom_;
+            f_impl((1:length(obj.aux_impl_ode))+sum(keep_dof_)+obj.getNumDOF) = obj.aux_impl_ode;
         end
 
         function Fz_ = getConstraintForce(obj, name, remove_eps)
@@ -728,7 +733,7 @@ classdef MultiBodySystem  < handle
 
             Fz_ = Fz_(ismember(fieldnames(obj.doc_idx), name));
             if remove_eps
-                Fz_ = Body.removeEps(Fz_);
+                Fz_ = obj.removeEps(Fz_);
             end
         end
 
@@ -834,11 +839,9 @@ classdef MultiBodySystem  < handle
             ext_d = cell(size(exts));
             for i = 1:length(exts)
                 partial_names = obj.getExternalDerivs(i, naming);
-                % TODO: save assumptions here too?
                 partial_syms = cellfun(@msym, partial_names);
                 deps = obj.external_deps.(ext_names{i});
                 for j = 1:length(deps)
-                    % partial_deriv = functionalDerivative(obj.externals(i), deps(j));
                     partial_deriv = diff(exts(i), deps(j));
                     e = subs(e, partial_deriv, partial_syms(j));            
                 end
@@ -852,7 +855,6 @@ classdef MultiBodySystem  < handle
             vars.ext = ext_vars;
             vars.ext_d = ext_d;
 
-            % TODO: save_assumptions here too?
             vars.u = cellfun(@msym, obj.getInName([], naming));
             vars.p = cellfun(@msym, obj.getParamName([], naming));
 
@@ -1028,6 +1030,28 @@ classdef MultiBodySystem  < handle
                 v(i) = p.(char(pv(i)));
             end
         end
+
+        function expr = removeEps(obj, expr, keep_symbols)
+            arguments
+                obj
+                expr msym
+                keep_symbols (1,1) logical = false
+            end
+            % remove small rotations
+            expr = expr.subs(obj.sym_eps_rot^2, 0, true);
+            if ~keep_symbols
+                expr = expr.subs(obj.sym_eps_rot, 1);
+            end
+
+            % remove cross terms of small elastic terms
+            expr = expr.subs(obj.sym_eps^2, 0, true);
+            if ~keep_symbols
+                expr = expr.subs(obj.sym_eps, 1);
+            end
+
+            % TODO: what about eps*eps_rot cross terms?
+        end
+
         function checkSetupCompleted(obj)
             if ~obj.setupCompleted
                 error('Model setup has not been completed. Please run completeSetup first.')
