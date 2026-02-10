@@ -3,37 +3,33 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         Name (1,:) char = ''
         Description (1,1) string = "No description"
 
-        T (4,4) sym = eye(4)                    % Homogeneous transformation matrix relative to parent. Multiply body coordinates with this matrix to get global coordinates
+        T (:,:) msym = []                        % Homogeneous transformation matrix relative to parent. Multiply body coordinates with this matrix to get global coordinates
         children (1,:) Body = Body.empty         
         parent = []
         system (1,:) MultiBodySystem = MultiBodySystem.empty
 
-        T0 (4,4) sym = eye(4)                   % Homogeneous transformation matrix from inertial reference frame
-        v0 (3,1) sym = 0
-        v0_z (3,1) sym = 0                      % Velocity including movement in constraint direction
-        a0 (3,1) sym = 0
-        omega0 (3,1) sym = 0
-        omega0_z (3,1) sym = 0                  % Rotational velocity including movement in constraint direction
-        alpha0 (3,1) sym = 0 
-        v_p (3,:) sym = []
-        omega_p (3,:) sym = []
-        vz_p (3,:) sym = []                     % Partial velocities in constrain direction
-        omegaz_p (3,:) sym = []                 % Partial rotational velocities in constrain direction
+        T0 (:,:) msym = []                   % Homogeneous transformation matrix from inertial reference frame
+        v0 (3,1) msym = [0 0 0]'
+        v0_z (3,1) msym = [0 0 0]'               % Velocity including movement in constraint direction
+        a0 (3,1) msym = [0 0 0]'
+        omega0 (3,1) msym = [0 0 0]'
+        omega0_z (3,1) msym = [0 0 0]'           % Rotational velocity including movement in constraint direction
+        alpha0 (3,1) msym = [0 0 0]'
+        v_p (3,:) msym = msym.empty(3, 0)
+        omega_p (3,:) msym = msym.empty(3, 0)
+        vz_p (3,:) msym = msym.empty(3, 0)       % Partial velocities in constrain direction
+        omegaz_p (3,:) msym = msym.empty(3, 0)   % Partial rotational velocities in constrain direction
 
-        F_ext (3, 1) sym = 0
-        M_ext (3, 1) sym = 0
+        F_ext (:, 1) msym = []
+        M_ext (:, 1) msym = []
         
-        F (3, 1) sym = 0
-        M (3, 1) sym = 0
+        F (:, 1) msym = []
+        M (:, 1) msym = []
 
-        Fgen (:, 1) sym = 0
-        Fconstr (:, 1) sym = 0                  % Constraint forces
+        Fgen (:, 1) msym = []
+        Fconstr (:, 1) msym = []                % Constraint forces
 
         forcesPrepared = false                  % replace this by a general locking/finalization of the entire system
-    end
-    properties (Constant)
-        sym_eps = sym('eps', 'real');           % variable to control cross terms of small (elastic) deformations
-        sym_eps_rot = sym('eps_rot', 'real');   % variable to control cross terms of small (elastic) rotations
     end
 
     methods
@@ -45,6 +41,12 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             if nargin > 1
                 obj.Description = description;
             end
+            obj.T = eye(4);
+            obj.T0 = eye(4);
+            obj.F_ext = [0 0 0]';
+            obj.M_ext = [0 0 0]';
+            obj.F = [0 0 0]';
+            obj.M = [0 0 0]';
         end
 
         % Add a direct child
@@ -67,7 +69,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             if numel(vec) ~= 3
                 error("Translation vector must have 3 elements.");
             end
-            T_translate = sym(eye(4));
+            T_translate = msym(eye(4));
             T_translate(1:3,4) = vec;
             obj.T = obj.T * T_translate;
         end
@@ -127,8 +129,8 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             obj.a0= diff(obj.v0, obj.system.time);
 
             w_skew= simplify(diff(obj.T0(1:3, 1:3), obj.system.time)*obj.T0(1:3, 1:3).');
-            obj.omega0= [(w_skew(3, 2)-w_skew(2, 3))/sym(2); (w_skew(1, 3)-w_skew(3, 1))/sym(2); (w_skew(2, 1)-w_skew(1, 2))/sym(2)];
-            obj.omega0= simplify(obj.removeEps(obj.omega0, true));
+            obj.omega0= [(w_skew(3, 2)-w_skew(2, 3))/msym(2); (w_skew(1, 3)-w_skew(3, 1))/msym(2); (w_skew(2, 1)-w_skew(1, 2))/msym(2)];
+            obj.omega0= simplify(obj.removeEps(obj.omega0, obj.system.sym_eps, obj.system.sym_eps_rot, true));
             % store with and remove movement inconstraint directions
             obj.omega0_z= obj.omega0;
             obj.omega0 = subs(obj.omega0, obj.system.z, zeros(size(obj.system.z)));
@@ -137,11 +139,11 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
 
             % Partial velocities
             % TODO: add explanation, why eps is removed here
-            obj.v_p= simplify(subs(jacobian(obj.v0, diff(obj.system.q, obj.system.time)), [obj.sym_eps, obj.sym_eps_rot], [1, 1]));
-            obj.omega_p= simplify(subs(jacobian(obj.omega0, diff(obj.system.q, obj.system.time)), [obj.sym_eps, obj.sym_eps_rot], [1, 1]));
-            obj.vz_p= subs(jacobian(obj.v0_z, diff(obj.system.z, obj.system.time)), [obj.sym_eps, obj.sym_eps_rot], [1, 1]);
+            obj.v_p= simplify(subs(jacobian(obj.v0, diff(obj.system.q, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]));
+            obj.omega_p= simplify(subs(jacobian(obj.omega0, diff(obj.system.q, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]));
+            obj.vz_p= subs(jacobian(obj.v0_z, diff(obj.system.z, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]);
             obj.vz_p= simplify(subs(obj.vz_p, obj.system.z, zeros(size(obj.system.z))));
-            obj.omegaz_p= subs(jacobian(obj.omega0_z, diff(obj.system.z, obj.system.time)), [obj.sym_eps, obj.sym_eps_rot], [1, 1]);
+            obj.omegaz_p= subs(jacobian(obj.omega0_z, diff(obj.system.z, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]);
             obj.omegaz_p= simplify(subs(obj.omegaz_p, obj.system.z, zeros(size(obj.system.z))));
 
             for i= 1:length(obj.children)
@@ -174,7 +176,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             end
             obj.calcGenForce();
             
-            obj.Fgen = obj.removeEps(obj.Fgen);
+            obj.Fgen = obj.removeEps(obj.Fgen, obj.system.sym_eps, obj.system.sym_eps_rot);
             
             Fgen = obj.Fgen;
             for i= 1:length(obj.children)
@@ -199,7 +201,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function applyForce(obj, F)
             arguments
                 obj
-                F (3,1) sym
+                F (3,1) msym
             end
             obj.F_ext = obj.F_ext + F;
         end
@@ -208,7 +210,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function applyMoment(obj, M)
             arguments
                 obj
-                M (3,1) sym
+                M (3,1) msym
             end
             obj.M_ext = obj.M_ext + M;
         end
@@ -218,7 +220,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function forceBetween(obj, F, b2)
             arguments
                 obj
-                F (3,1) sym
+                F (3,1) msym
                 b2 (1,1) Body
             end
             obj.applyForce(F)
@@ -230,7 +232,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function momentBetween(obj, M, b2)
             arguments
                 obj
-                M (3,1) sym
+                M (3,1) msym
                 b2 (1,1) Body
             end
             obj.applyMoment(M)
@@ -242,8 +244,8 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function applyForceInLocal(obj, r, F)
             arguments
                 obj
-                r (3,1) sym         % position relative to center of mass or reference system in body local coordinates
-                F (3,1) sym         % force in body local coordinates
+                r (3,1) msym         % position relative to center of mass or reference system in body local coordinates
+                F (3,1) msym         % force in body local coordinates
             end
             % make sure T0 is already available
             obj.system.checkSetupCompleted()
@@ -258,8 +260,8 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function applyForceIn0(obj, r0, F0)
             arguments
                 obj
-                r0 (3,1) sym         % position relative to center of mass or reference system in global coordinates
-                F0 (3,1) sym         % force in global coordinates
+                r0 (3,1) msym         % position relative to center of mass or reference system in global coordinates
+                F0 (3,1) msym         % force in global coordinates
             end
             obj.applyForce(F0)
             obj.applyMoment(crossmat(r0)*F0)
@@ -290,31 +292,33 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                  y*x*C + z*s, y*y*C + c,     y*z*C - x*s;
                  z*x*C - y*s, z*y*C + x*s, z*z*C + c];
 
-            T = sym(eye(4));
+            T = msym(eye(4));
             T(1:3,1:3) = R;
         end
         
         function mustBeNumericOrSym(val)
-            if ~(isnumeric(val) || isa(val,'sym'))
+            if ~(isnumeric(val) || isa(val,'msym'))
                 error('Value must be numeric or symbolic.');
             end
         end
 
-        function expr = removeEps(expr, keep_symbols)
+        function expr = removeEps(expr, sym_eps, sym_eps_rot, keep_symbols)
             arguments
-                expr 
+                expr
+                sym_eps (1,1) msym
+                sym_eps_rot (1,1) msym
                 keep_symbols (1,1) logical = false
             end
             % remove small rotations
-            expr = expr.subst(Body.sym_eps_rot^2, 0, true);
+            expr = expr.subs(sym_eps_rot^2, 0, true);
             if ~keep_symbols
-                expr = expr.subst(Body.sym_eps_rot, 0);
+                expr = expr.subs(sym_eps_rot, 0);
             end
 
             % remove cross terms of small elastic terms
-            expr = expr.subst(Body.sym_eps^2, 0, true);
+            expr = expr.subs(sym_eps^2, 0, true);
             if ~keep_symbols
-                expr = expr.subst(Body.sym_eps, 0);
+                expr = expr.subs(sym_eps, 0);
             end
 
             % TODO: what about eps*eps_rot cross terms?

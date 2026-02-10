@@ -51,10 +51,10 @@ classdef Parameters < handle
                 end
             else
                 if ~isempty(dims)
-                    obj.param_syms.(name) = sym(name, 'real');
+                    obj.param_syms.(name) = msym(name, 'real');
                     obj.param_dims.(name) = dims;
                 else
-                    obj.param_syms.(name) = sym(name, 'real');
+                    obj.param_syms.(name) = msym(name, 'real');
                     obj.param_dims.(name) = [1 1];
                 end
             end

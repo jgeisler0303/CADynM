@@ -107,6 +107,8 @@ function outStr = executeCodeBlock(code, temp_data)
     try
         outStr = evalc(code);
     catch ME
-        error('Error executing code block: %s\n%s', code, ME.message);
+        cause = MException('matlabTemplateEngine:evalError', 'Error executing code block:\n%s\n', code);
+        ME = ME.addCause(cause);
+        rethrow(ME);
     end
 end

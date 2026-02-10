@@ -1,10 +1,10 @@
 classdef ElasticBody  < Body
     properties
-        ElasticDOF (:,1) sym = []
+        ElasticDOF (:,1) msym = []
         sid SID
-        Fe (:, 1) sym = 0
-        Fe_ext (:, 1) sym = 0
-        e_p (:,:) sym = []
+        Fe (:, 1) msym = []
+        Fe_ext (:, 1) msym = []
+        e_p (:,:) msym = []
         ConstrLoads (1, :) cell = {}
         ChildFrame (1,:) double = []    % number of frame to which a child is attached
     end
@@ -55,8 +55,8 @@ classdef ElasticBody  < Body
                 z_load = [0 0 0]';
             end
 
-            T_elast= sym(eye(4));
-            T_elast(1:3, 4) = obj.sid.frame(iframe).origin.evalTaylor(obj.ElasticDOF, obj.sym_eps) + z_load;
+            T_elast= msym(eye(4));
+            T_elast(1:3, 4) = obj.sid.frame(iframe).origin.evalTaylor(obj.ElasticDOF, obj.system.sym_eps) + z_load;
             T_elast(1:3, 1:3) = Trot_elast(obj, iframe);
             body.T = T_elast * body.T; % pre-multiply because all body transformations come after the movement caused by being attached to the elastic body
         
@@ -74,7 +74,7 @@ classdef ElasticBody  < Body
         function applyElasticForce(obj, Fe)
             arguments
                 obj
-                Fe (:,1) sym
+                Fe (:,1) msym
             end
 
             obj.Fe_ext = obj.Fe_ext + Fe;
@@ -89,7 +89,7 @@ classdef ElasticBody  < Body
             if isempty(iframe) || (ischar(iframe) && strcmpi(iframe, 'last'))
                 iframe = length(obj.sid.frame);
             end
-            R = obj.sid.frame(iframe).ap.evalTaylor(obj.ElasticDOF, obj.sym_eps_rot*obj.sym_eps);
+            R = obj.sid.frame(iframe).ap.evalTaylor(obj.ElasticDOF, obj.system.sym_eps_rot*obj.system.sym_eps);
         end
         
         % calculate acceleration of elastic point in global coordinates
@@ -105,7 +105,7 @@ classdef ElasticBody  < Body
             
             obj.system.checkSetupCompleted()
 
-            r_rel = obj.sid.frame(iframe).origin.evalTaylor(obj.ElasticDOF, obj.sym_eps);
+            r_rel = obj.sid.frame(iframe).origin.evalTaylor(obj.ElasticDOF, obj.system.sym_eps);
             v_rel = diff(r_rel, obj.system.time);
             a_rel = diff(v_rel, obj.system.time);
         
@@ -126,21 +126,21 @@ classdef ElasticBody  < Body
             
             obj.F = obj.sid.mass * (obj.system.gravity - obj.a0);
             
-            md_global = rotationToGlobal * obj.sid.md.evalTaylor(obj.ElasticDOF, obj.sym_eps);
+            md_global = rotationToGlobal * obj.sid.md.evalTaylor(obj.ElasticDOF, obj.system.sym_eps);
             obj.F = obj.F - crossmat(obj.alpha0) * md_global;
             obj.F = obj.F - crossmat(obj.omega0) * (crossmat(obj.omega0) * md_global);
 
-            Ct = evalTaylor(obj.sid.Ct, obj.ElasticDOF, obj.sym_eps);
+            Ct = evalTaylor(obj.sid.Ct, obj.ElasticDOF, obj.system.sym_eps);
             Ct_d = zeros(3, 1);
             Ct_dd = zeros(3, 1);
             for ief = 1:length(obj.ElasticDOF)
-                Ct_d = Ct_d + Ct(ief, :).' * eDOF_d(ief)*obj.sym_eps;
-                Ct_dd = Ct_dd + Ct(ief, :).' * eDOF_dd(ief)*obj.sym_eps;
+                Ct_d = Ct_d + Ct(ief, :).' * eDOF_d(ief)*obj.system.sym_eps;
+                Ct_dd = Ct_dd + Ct(ief, :).' * eDOF_dd(ief)*obj.system.sym_eps;
             end
             obj.F = obj.F - 2 * crossmat(obj.omega0) * rotationToGlobal * Ct_d;
             obj.F = obj.F - rotationToGlobal * Ct_dd;
 
-            Phi = evalTaylor(obj.sid.I, obj.ElasticDOF, obj.sym_eps);
+            Phi = evalTaylor(obj.sid.I, obj.ElasticDOF, obj.system.sym_eps);
 
             PhiG_global = rotationToGlobal * Phi * rotationToLocal;
 
@@ -150,17 +150,17 @@ classdef ElasticBody  < Body
 
             obj.M = obj.M + crossmat(md_global) * (obj.system.gravity - obj.a0);
 
-            Cr = evalTaylor(obj.sid.Cr, obj.ElasticDOF, obj.sym_eps);
+            Cr = evalTaylor(obj.sid.Cr, obj.ElasticDOF, obj.system.sym_eps);
             Cr_dd = zeros(3, 1);
             for ief = 1:length(obj.ElasticDOF)
-                Cr_dd = Cr_dd + Cr(ief, :).' * eDOF_dd(ief)*obj.sym_eps;
+                Cr_dd = Cr_dd + Cr(ief, :).' * eDOF_dd(ief)*obj.system.sym_eps;
             end
             obj.M = obj.M - rotationToGlobal * Cr_dd;
 
-            Gr = evalTaylor(obj.sid.Gr, obj.ElasticDOF, obj.sym_eps);
+            Gr = evalTaylor(obj.sid.Gr, obj.ElasticDOF, obj.system.sym_eps);
             Gr_ = zeros(3, 3);
             for ief = 1:length(obj.ElasticDOF) 
-                Gr_ = Gr_ + Gr(:, :, ief) * eDOF_d(ief)*obj.sym_eps;
+                Gr_ = Gr_ + Gr{ief}(:, :) * eDOF_d(ief)*obj.system.sym_eps;
             end
             obj.M = obj.M - rotationToGlobal * Gr_ * omega_local;
 
@@ -173,35 +173,35 @@ classdef ElasticBody  < Body
                 obj.Fe(ief) = - Ct(ief, :) * grav_local;
                 obj.Fe(ief) = obj.Fe(ief) - Cr(ief, :) * alpha_local;
                 for jef = 1:length(obj.ElasticDOF)
-                    obj.Fe(ief) = obj.Fe(ief) - obj.sid.Me.M0(ief, jef) * eDOF_dd(jef)*obj.sym_eps;
+                    obj.Fe(ief) = obj.Fe(ief) - obj.sid.Me.M0(ief, jef) * eDOF_dd(jef)*obj.system.sym_eps;
                 end
             end
 
             w = [omega_local(1)*omega_local(1), omega_local(2)*omega_local(2), omega_local(3)*omega_local(3), omega_local(1)*omega_local(2), omega_local(2)*omega_local(3), omega_local(1)*omega_local(3)];
-            obj.Fe = obj.Fe - evalTaylor(obj.sid.Oe, obj.ElasticDOF, obj.sym_eps) * w.';
+            obj.Fe = obj.Fe - evalTaylor(obj.sid.Oe, obj.ElasticDOF, obj.system.sym_eps) * w.';
 
-            Ge = evalTaylor(obj.sid.Ge, obj.ElasticDOF, obj.sym_eps);
+            Ge = evalTaylor(obj.sid.Ge, obj.ElasticDOF, obj.system.sym_eps);
             for ief = 1:length(obj.ElasticDOF)
                 Ge_ = zeros(1, 3);
                 for jef = 1:length(obj.ElasticDOF)
                     % TODO = check for correct order of jef and ief
-                    Ge_ = Ge_ + squeeze(Ge(ief, :, jef)) * eDOF_d(jef)*obj.sym_eps;
+                    Ge_ = Ge_ + Ge{jef}(ief, :) * eDOF_d(jef)*obj.system.sym_eps;
                 end
                 obj.Fe(ief) = obj.Fe(ief) - Ge_ * omega_local;
             end
 
-            K = evalTaylor(obj.sid.Ke, obj.ElasticDOF, obj.sym_eps);
-            D = evalTaylor(obj.sid.De, obj.ElasticDOF, obj.sym_eps);
+            K = evalTaylor(obj.sid.Ke, obj.ElasticDOF, obj.system.sym_eps);
+            D = evalTaylor(obj.sid.De, obj.ElasticDOF, obj.system.sym_eps);
             for ief = 1:length(obj.ElasticDOF)
                 for jef = 1 : length(obj.ElasticDOF)
-                    obj.Fe(ief) = obj.Fe(ief) - K(ief, jef) * obj.ElasticDOF(jef)*obj.sym_eps;  % eps?
-                    obj.Fe(ief) = obj.Fe(ief) - D(ief, jef) * eDOF_d(jef)*obj.sym_eps;          % eps?
+                    obj.Fe(ief) = obj.Fe(ief) - K(ief, jef) * obj.ElasticDOF(jef)*obj.system.sym_eps;  % eps?
+                    obj.Fe(ief) = obj.Fe(ief) - D(ief, jef) * eDOF_d(jef)*obj.system.sym_eps;          % eps?
                 end
             end
 
-            obj.F = Body.removeEps(obj.F, true);
-            obj.M = Body.removeEps(obj.M, true);
-            obj.Fe = Body.removeEps(obj.Fe, true);
+            obj.F = Body.removeEps(obj.F, obj.system.sym_eps, obj.system.sym_eps_rot, true);
+            obj.M = Body.removeEps(obj.M, obj.system.sym_eps, obj.system.sym_eps_rot, true);
+            obj.Fe = Body.removeEps(obj.Fe, obj.system.sym_eps, obj.system.sym_eps_rot, true);
         end
 
         function calcGenForce(obj)
@@ -222,12 +222,12 @@ classdef ElasticBody  < Body
                     constr_forces = obj.system.getConstraintForce(obj.ConstrLoads{i}, false);
                     for j = 1:length(obj.ElasticDOF)
                         % M0 is already considered by the coupling of bodies via T_elast
-                        e_force = squeeze(obj.sid.frame(obj.ChildFrame(i)).phi.M1(:, :, j))' *constr_forces;
-                        obj.Fe = obj.Fe + e_force*obj.ElasticDOF(j)*obj.sym_eps;
+                        e_force = obj.sid.frame(obj.ChildFrame(i)).phi.M1{j}' *constr_forces;
+                        obj.Fe = obj.Fe + e_force*obj.ElasticDOF(j)*obj.system.sym_eps;
                     end
                 end
             end
-            obj.Fe = Body.removeEps(obj.Fe, true);
+            obj.Fe = Body.removeEps(obj.Fe, obj.system.sym_eps, obj.system.sym_eps_rot, true);
         end
     end
 end

@@ -69,8 +69,7 @@ makeCasADiNamedVector('externals', externalNames, [], 1, 0);
 {{
     f_impl = temp_data.replaceVars(temp_data.getImplStateSpaceODE(true));
 
-    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', f_impl);
-    opt = opt(1);
+    [opt, tnames, tvalues] = optimize(f_impl);
     for i = 1:length(tnames)
         printAssignC('', char(tnames(i)), tvalues(i), 'scalar')
     end
@@ -93,8 +92,7 @@ makeCasADiNamedVector('externals', externalNames, [], 1, 0);
 {{ 
     y = temp_data.replaceVars(struct2array(temp_data.outputs));
     
-    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', y);
-    opt = opt(1);
+    [opt, tnames, tvalues] = optimize(y);
     for i = 1:length(tnames)
         printAssignC('', char(tnames(i)), tvalues(i), 'scalar')
     end
