@@ -1179,6 +1179,12 @@ classdef MultiBodySystem  < handle
             end
         end
     end
+
+    methods (Static)
+        function s = sym(val)
+            s = sym(val);
+        end
+    end
     
     methods (Static, Access = private)
         function mustBeNonemptyCharOrCell(v)
