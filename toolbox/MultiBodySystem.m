@@ -1166,7 +1166,11 @@ classdef MultiBodySystem  < handle
 
     methods (Static)
         function s = sym(val)
-            s = sym(val);
+            if val==pi
+                s = msym.pi;
+            else
+                s = msym(val);
+            end
         end
     end
     
