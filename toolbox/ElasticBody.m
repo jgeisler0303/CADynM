@@ -1,10 +1,10 @@
 classdef ElasticBody  < Body
     properties
-        ElasticDOF (:,1) msym = []
+        ElasticDOF (:,1) = []
         sid SID
-        Fe (:, 1) msym = []
-        Fe_ext (:, 1) msym = []
-        e_p (:,:) msym = []
+        Fe (:, 1) = []
+        Fe_ext (:, 1) = []
+        e_p (:,:) = []
         ConstrLoads (1, :) cell = {}
         ChildFrame (1,:) double = []    % number of frame to which a child is attached
     end
@@ -55,7 +55,7 @@ classdef ElasticBody  < Body
                 z_load = [0 0 0]';
             end
 
-            T_elast= msym(eye(4));
+            T_elast= obj.system.createSymbolic(eye(4));
             T_elast(1:3, 4) = obj.sid.frame(iframe).origin.evalTaylor(obj.ElasticDOF, obj.system.sym_eps) + z_load;
             T_elast(1:3, 1:3) = Trot_elast(obj, iframe);
             body.T = T_elast * body.T; % pre-multiply because all body transformations come after the movement caused by being attached to the elastic body

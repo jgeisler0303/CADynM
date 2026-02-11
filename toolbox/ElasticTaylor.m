@@ -223,13 +223,13 @@ classdef ElasticTaylor  < handle
                 if order==1 && obj.nelem>0
                     error('4-dimensional M1 not supported in ElasticTaylor initialization.')
                     % [R,C] = meshgrid(1:size(M_, 3), 1:size(M_, 4));
-                    % M = arrayfun(@(r,c)msym(M_(:,:,r,c)), R, C, UniformOutput=false);
+                    % M = arrayfun(@(r,c)system.createSymbolic(M_(:,:,r,c)), R, C, UniformOutput=false);
                 elseif order==1 || obj.nelem>0
                     % M0 with nelem>0 or M1 with nelem=0
-                    M = arrayfun(@(r)msym(M_(:,:,r)), 1:size(M_, 3), UniformOutput=false);
+                    M = arrayfun(@(r)system.createSymbolic(M_(:,:,r)), 1:size(M_, 3), UniformOutput=false);
                 else
                     % M0 with nelem=0
-                    M = msym(M_);
+                    M = system.createSymbolic(M_);
                 end
 
                 params_idx_lin = find(params_idx);

@@ -3,33 +3,33 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         Name (1,:) char = ''
         Description (1,1) string = "No description"
 
-        T (:,:) msym = []                        % Homogeneous transformation matrix relative to parent. Multiply body coordinates with this matrix to get global coordinates
+        T (:,:) = []                        % Homogeneous transformation matrix relative to parent. Multiply body coordinates with this matrix to get global coordinates
         children (1,:) Body = Body.empty         
         parent = []
         system (1,:) MultiBodySystem = MultiBodySystem.empty
 
-        T0 (:,:) msym = []                   % Homogeneous transformation matrix from inertial reference frame
-        v0 (3,1) msym = [0 0 0]'
-        v0_z (3,1) msym = [0 0 0]'               % Velocity including movement in constraint direction
-        a0 (3,1) msym = [0 0 0]'
-        omega0 (3,1) msym = [0 0 0]'
-        omega0_z (3,1) msym = [0 0 0]'           % Rotational velocity including movement in constraint direction
-        alpha0 (3,1) msym = [0 0 0]'
-        v_p (3,:) msym = msym.empty(3, 0)
-        omega_p (3,:) msym = msym.empty(3, 0)
-        vz_p (3,:) msym = msym.empty(3, 0)       % Partial velocities in constrain direction
-        omegaz_p (3,:) msym = msym.empty(3, 0)   % Partial rotational velocities in constrain direction
+        T0 (:,:) = []                       % Homogeneous transformation matrix from inertial reference frame
+        v0 (3,1) = []
+        v0_z (3,1) = []                    % Velocity including movement in constraint direction
+        a0 (3,1) = []
+        omega0 (3,1) = []
+        omega0_z (3,1) = []                % Rotational velocity including movement in constraint direction
+        alpha0 (3,1) = []
+        v_p (3,:) = []
+        omega_p (3,:) = []
+        vz_p (3,:) = []                    % Partial velocities in constrain direction
+        omegaz_p (3,:) = []                % Partial rotational velocities in constrain direction
 
-        F_ext (:, 1) msym = []
-        M_ext (:, 1) msym = []
+        F_ext (:, 1) = []
+        M_ext (:, 1) = []
         
-        F (:, 1) msym = []
-        M (:, 1) msym = []
+        F (:, 1) = []
+        M (:, 1) = []
 
-        Fgen (:, 1) msym = []
-        Fconstr (:, 1) msym = []                % Constraint forces
+        Fgen (:, 1) = []
+        Fconstr (:, 1) = []                % Constraint forces
 
-        forcesPrepared = false                  % replace this by a general locking/finalization of the entire system
+        forcesPrepared = false              % replace this by a general locking/finalization of the entire system
     end
 
     methods
@@ -41,6 +41,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             if nargin > 1
                 obj.Description = description;
             end
+            % Initialize with numeric matrices that will be converted to symbolic by the system
             obj.T = eye(4);
             obj.T0 = eye(4);
             obj.F_ext = [0 0 0]';
@@ -69,7 +70,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             if numel(vec) ~= 3
                 error("Translation vector must have 3 elements.");
             end
-            T_translate = msym(eye(4));
+            T_translate = obj.system.createSymbolic(eye(4));
             T_translate(1:3,4) = vec;
             obj.T = obj.T * T_translate;
         end
@@ -79,11 +80,11 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             axis = upper(axis);
             switch axis
                 case 'X'
-                    R = Body.rotationMatrix([1 0 0], angle);
+                    R = obj.rotationMatrix([1 0 0], angle);
                 case 'Y'
-                    R = Body.rotationMatrix([0 1 0], angle);
+                    R = obj.rotationMatrix([0 1 0], angle);
                 case 'Z'
-                    R = Body.rotationMatrix([0 0 1], angle);
+                    R = obj.rotationMatrix([0 0 1], angle);
                 otherwise
                     error("Axis must be 'X', 'Y', or 'Z'.");
             end
@@ -97,7 +98,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 error("Rotation axis must be a non-zero 3D vector.");
             end
             axisNorm = axisVec / norm(axisVec);
-            R = Body.rotationMatrix(axisNorm, angle);
+            R = obj.rotationMatrix(axisNorm, angle);
             obj.T = obj.T * R;
         end
 
@@ -129,7 +130,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             obj.a0= diff(obj.v0, obj.system.time);
 
             w_skew= simplify(diff(obj.T0(1:3, 1:3), obj.system.time)*obj.T0(1:3, 1:3).');
-            obj.omega0= [(w_skew(3, 2)-w_skew(2, 3))/msym(2); (w_skew(1, 3)-w_skew(3, 1))/msym(2); (w_skew(2, 1)-w_skew(1, 2))/msym(2)];
+            obj.omega0= [(w_skew(3, 2)-w_skew(2, 3))/obj.system.createSymbolic(2); (w_skew(1, 3)-w_skew(3, 1))/obj.system.createSymbolic(2); (w_skew(2, 1)-w_skew(1, 2))/obj.system.createSymbolic(2)];
             obj.omega0= simplify(obj.system.removeEps(obj.omega0, true));
             % store with and remove movement inconstraint directions
             obj.omega0_z= obj.omega0;
@@ -272,7 +273,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
 
     methods (Static)
         % Rodrigues' formula for rotation matrix and wrap into 4x4
-        function T = rotationMatrix(axis, angle)
+        function T = rotationMatrix(obj, axis, angle)
             if ischar(axis)
                 switch axis
                     case 'x'
@@ -294,12 +295,12 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                  y*x*C + z*s, y*y*C + c,     y*z*C - x*s;
                  z*x*C - y*s, z*y*C + x*s, z*z*C + c];
 
-            T = msym(eye(4));
+            T = obj.system.createSymbolic(eye(4));
             T(1:3,1:3) = R;
         end
         
         function mustBeNumericOrSym(val)
-            if ~(isnumeric(val) || isa(val,'msym'))
+            if ~(isnumeric(val) || isa(val,'msym') || isa(val,'sym'))
                 error('Value must be numeric or symbolic.');
             end
         end

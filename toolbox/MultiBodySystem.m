@@ -1,15 +1,16 @@
 classdef MultiBodySystem  < handle
     properties
         Name (1,1) string = "UnnamedSystem"
-        gravity (:,1) msym = []
+        symbolicBackend (1,1) string = "msym"  % 'sym' for MATLAB Symbolic, 'msym' for MAMaS/Maxima
+        gravity (:,1) = []
         bodies struct = struct()                % All bodies in the system
-        time (:,1) msym = []
+        time (:,1) = []
         dof struct = struct()                   % Degrees of freedom
         dof_idx struct = struct()        
-        q (:,1) msym = []
+        q (:,1) = []
         doc struct = struct()                   % Degrees of constraint
         doc_idx struct = struct()               % Constraintforces are calculated in the direction of these coordinates
-        z (:,1) msym = []                        % Constraint coordinates
+        z (:,1) = []                            % Constraint coordinates
         inputs struct = struct()
         externals struct = struct()             % Externally calculated value that may depend on inputs and states
         external_deps struct = struct()         % Dependencies of the external
@@ -23,18 +24,18 @@ classdef MultiBodySystem  < handle
 
         aux_state struct = struct()             % auxiliary state names
         aux_order struct = struct()             % order = max derivative of each state, currently only first order is supported
-        aux_impl_ode (:,1) msym = []            % auxiliary implicit first order ode        
+        aux_impl_ode (:,1) = []                 % auxiliary implicit first order ode        
 
         setupCompleted = false                  % set to true once model is finished an no further data can be added
 
-        eom (:,1) msym = []
-        Fz (:,1) msym = []                      % cache for calculated constraint forces
-        M (:,:) msym = []
-        C (:,:) msym = []
-        K (:,:) msym = []
-        B (:,:) msym = []
-        CD (:,:) msym = []
-        F (:,:) msym = []
+        eom (:,1) = []
+        Fz (:,1) = []                           % cache for calculated constraint forces
+        M (:,:) = []
+        C (:,:) = []
+        K (:,:) = []
+        B (:,:) = []
+        CD (:,:) = []
+        F (:,:) = []
 
         keep_dof logical = []                   % cache for positional states that are not unused
         aux_ode_first_order logical = []        % cache for test result, if all aux ODEs are first order
@@ -47,25 +48,34 @@ classdef MultiBodySystem  < handle
     end
 
     methods
-        % Constructor with optional name
-        function obj = MultiBodySystem(name, dof, input)
-            obj.gravity = msym([0 0 0]');
-            obj.time = msym('time', 'real');
-            obj.sym_eps = msym('eps', 'real');
-            obj.sym_eps_rot = msym('eps_rot', 'real');
+        % Constructor with optional name and symbolic backend
+        % symbolicBackend: 'sym' for MATLAB Symbolic Toolbox, 'msym' for MAMaS/Maxima (default)
+        function obj = MultiBodySystem(name, dof, input, symbolicBackend)
+            % Set the symbolic backend
+            if nargin > 3 && ~isempty(symbolicBackend)
+                obj.symbolicBackend = string(symbolicBackend);
+            else
+                obj.symbolicBackend = "msym";  % Default backend
+            end
+            
+            % Initialize symbolic variables based on selected backend
+            obj.gravity = obj.createSymbolic([0 0 0]');
+            obj.time = obj.createSymbolic('time', 'real');
+            obj.sym_eps = obj.createSymbolic('eps', 'real');
+            obj.sym_eps_rot = obj.createSymbolic('eps_rot', 'real');
 
-            obj.params = Parameters();
-            if nargin > 0
+            % Pass system reference to Parameters so it can use the correct backend
+            obj.params = Parameters([], obj);
+            if nargin > 0 && ~isempty(name)
                 obj.Name = string(name);
             end
-            if nargin>1
+            if nargin > 1 && ~isempty(dof)
                 obj.addGeneralizedCoordinate(dof)
             end
-            if nargin>2
+            if nargin > 2 && ~isempty(input)
                 obj.addInput(input)
             end
-            % we have to reassign it, otherwise it may be the same for all
-            % instances
+            % we have to reassign it, otherwise it may be the same for all instances
         end
 
         % Add a generalized coordinate by name
@@ -184,8 +194,8 @@ classdef MultiBodySystem  < handle
             obj.checkSetupNotCompleted();
             obj.checkName(inName)
     
-            % Define symbolic variable dynamically
-            symVar = msym(inName);
+            % Define symbolic variable dynamically using backend abstraction
+            symVar = obj.createSymbolic(inName);
             % TODO: consider time derivatives?
     
             % Store it
@@ -197,7 +207,7 @@ classdef MultiBodySystem  < handle
             arguments
                 obj
                 outName { mustBeTextScalar }
-                expr (1,1) msym
+                expr
             end
             
             if isfield(obj.outputs, outName)
@@ -211,17 +221,17 @@ classdef MultiBodySystem  < handle
             arguments
                 obj
                 extName (1,:) char
-                depends (1,:) msym = msym.empty(0,0)
+                depends = []
             end
     
             obj.checkSetupNotCompleted();            
             checkName(obj, extName)
     
-            % Define symbolic variable dynamically
+            % Define symbolic variable dynamically using backend abstraction
             if isempty(depends)
-                symFun = msym(extName);
+                symFun = obj.createSymbolic(extName);
             else
-                symFun = msym(extName);
+                symFun = obj.createSymbolic(extName);
                 symFun.depends(depends);
                 % TODO: use gradef here too
             end
@@ -251,10 +261,9 @@ classdef MultiBodySystem  < handle
             obj.checkSetupNotCompleted();
             obj.checkName(auxName)
     
-            % Define symbolic variable dynamically
-            % TODO: use getDerivatives here too, somehow manage number of
-            % used derivatives
-            symFun = msym(auxName);
+            % Define symbolic variable dynamically using backend abstraction
+            % TODO: use getDerivatives here too, somehow manage number of used derivatives
+            symFun = obj.createSymbolic(auxName);
             symFun.depends(obj.time);
 
             % Store it
@@ -338,7 +347,7 @@ classdef MultiBodySystem  < handle
         function dx = getTimeDeriv(obj, var, order)
             arguments
                 obj
-                var (:,1) msym
+                var
                 order (1,1) double = 1
             end
             if any(ismember(var, struct2array(obj.aux_state)))
@@ -667,7 +676,7 @@ classdef MultiBodySystem  < handle
             if ~isempty(obj.eom)
                 eom_ = obj.eom;
             else
-                eom_ = msym(zeros(length(obj.q), 1));
+                eom_ = obj.symbolicZeros(length(obj.q), 1);
                 for i= 1:length(obj.attached_bodies)
                     eom_ = eom_ + obj.attached_bodies(i).collectGenForces;
                 end
@@ -696,7 +705,7 @@ classdef MultiBodySystem  < handle
             for i = 1:length(obj.q)
                 % positonal state derivatives
                 % these have to match with the names produced in getDStateNames
-                dx1(i, 1) = msym(sprintf('dot_%s', obj.getQName(i)), 'real');
+                dx1(i, 1) = obj.createSymbolic(sprintf('dot_%s', obj.getQName(i)), 'real');
             end
 
             eom_ = getEOM(obj);
@@ -722,7 +731,7 @@ classdef MultiBodySystem  < handle
             if ~isempty(obj.eom)
                 Fz_ = obj.Fz;
             else
-                Fz_ = msym(zeros(length(obj.z), 1));
+                Fz_ = obj.symbolicZeros(length(obj.z), 1);
                 for i= 1:length(obj.attached_bodies)
                     Fz_ = Fz_ + obj.attached_bodies(i).collectConstrForces;
                 end
@@ -764,7 +773,7 @@ classdef MultiBodySystem  < handle
             eom_ = getEOM(obj);
             
             if isempty(fieldnames(obj.inputs))
-                inputs_ = msym('dummy', 'real');
+                inputs_ = obj.createSymbolic('dummy', 'real');
             else
                 inputs_ = struct2array(obj.inputs);
             end
@@ -772,19 +781,19 @@ classdef MultiBodySystem  < handle
             % daeFunction doesn't work with symfuns
             fn = fieldnames(obj.externals);
             if isempty(fn)
-                externalSyms = msym('dummy', 'real');
+                externalSyms = obj.createSymbolic('dummy', 'real');
             else
                 externalSyms= msym.empty(1, 0);
                 for i = 1:length(fn)
-                    externalSyms(end+1) = msym(fn{i}, 'real');
+                    externalSyms(end+1) = obj.createSymbolic(fn{i}, 'real');
                 end
                 eom_ = subs(eom_, struct2array(obj.externals), externalSyms);
             end
 
             for i = 1:length(obj.q)
-                x1(i, 1) = msym(sprintf('x1_%d', i));
+                x1(i, 1) = obj.createSymbolic(sprintf('x1_%d', i));
                 x1(i, 1).depends(obj.time);
-                x2(i, 1) = msym(sprintf('x2_%d', i));
+                x2(i, 1) = obj.createSymbolic(sprintf('x2_%d', i));
                 x2(i, 1).depends(obj.time);
             end
             x = [x1 ; x2; struct2array(obj.aux_state)];
@@ -1083,11 +1092,11 @@ classdef MultiBodySystem  < handle
             obj.checkName(var_name_d);
             obj.checkName(var_name_dd);
 
-            x    = msym(var_name);
+            x    = obj.createSymbolic(var_name);
             gradef(x, obj.time, var_name_d)
-            x_d  = msym(var_name_d);
+            x_d  = obj.createSymbolic(var_name_d);
             gradef(x_d, obj.time, var_name_dd)
-            x_dd = msym(var_name_dd);
+            x_dd = obj.createSymbolic(var_name_dd);
             depends(x_dd, obj.time)
         end
 
@@ -1161,6 +1170,128 @@ classdef MultiBodySystem  < handle
             else
                 keep_dof_ = obj.keep_dof;
             end
+        end
+    end
+
+    methods
+        % ===== SYMBOLIC BACKEND ABSTRACTION METHODS =====
+        % These methods provide a unified interface to create symbolic objects
+        % that work with both 'sym' (MATLAB Symbolic) and 'msym' (MAMaS/Maxima) backends.
+        
+        % Create a symbolic object based on the selected backend
+        function result = createSymbolic(obj, varargin)
+            % createSymbolic(name, ...) or createSymbolic(value)
+            % Delegates to the appropriate backend (sym or msym)
+            if strcmp(obj.symbolicBackend, "sym")
+                result = obj.createSymbolicSym(varargin{:});
+            elseif strcmp(obj.symbolicBackend, "msym")
+                result = obj.createSymbolicMsym(varargin{:});
+            else
+                error('Unknown symbolic backend: %s', obj.symbolicBackend);
+            end
+        end
+        
+        % Create identity matrix using the selected backend
+        function result = symbolicEye(obj, n, m)
+            if nargin < 3
+                m = n;
+            end
+            if strcmp(obj.symbolicBackend, "sym")
+                result = sym(eye(n, m));
+            elseif strcmp(obj.symbolicBackend, "msym")
+                result = msym(eye(n, m));
+            else
+                error('Unknown symbolic backend: %s', obj.symbolicBackend);
+            end
+        end
+        
+        % Create zero matrix using the selected backend
+        function result = symbolicZeros(obj, varargin)
+            mat = zeros(varargin{:});
+            if strcmp(obj.symbolicBackend, "sym")
+                result = sym(mat);
+            elseif strcmp(obj.symbolicBackend, "msym")
+                result = msym(mat);
+            else
+                error('Unknown symbolic backend: %s', obj.symbolicBackend);
+            end
+        end
+        
+        % Backend-specific helper: Create symbolic with MATLAB Symbolic Toolbox
+        function result = createSymbolicSym(obj, varargin)
+            if isempty(varargin)
+                error('At least one argument required');
+            end
+            
+            x = varargin{1};
+            
+            % Handle numeric input
+            if isnumeric(x)
+                result = sym(x);
+                return;
+            end
+            
+            % Handle string/char input (variable name)
+            if isstring(x) || ischar(x)
+                name = char(x);
+                
+                % Check if there's a 'real' type specification
+                if length(varargin) > 1 && isstring(varargin{2}) && varargin{2} == "real"
+                    result = sym(name, 'real');
+                    assume(result, 'real');
+                else
+                    result = sym(name, 'real');
+                end
+                return;
+            end
+            
+            % Handle cell array (create multiple variables)
+            if iscell(x)
+                result = sym(x);
+                return;
+            end
+            
+            error('Unsupported input type for symbolic creation');
+        end
+        
+        % Backend-specific helper: Create symbolic with MAMaS/Maxima
+        function result = createSymbolicMsym(obj, varargin)
+            if isempty(varargin)
+                error('At least one argument required');
+            end
+            
+            x = varargin{1};
+            
+            % Handle numeric input
+            if isnumeric(x)
+                result = msym(x);
+                return;
+            end
+            
+            % Handle string/char input (variable name)
+            if isstring(x) || ischar(x)
+                name = char(x);
+                
+                % Check if there's a 'real' type specification
+                if length(varargin) > 1
+                    if isstring(varargin{2}) && varargin{2} == "real"
+                        result = msym(name, 'real');
+                    else
+                        result = msym(name, varargin{2:end});
+                    end
+                else
+                    result = msym(name);
+                end
+                return;
+            end
+            
+            % Handle cell array (create multiple variables)
+            if iscell(x)
+                result = msym(x);
+                return;
+            end
+            
+            error('Unsupported input type for symbolic creation');
         end
     end
 
