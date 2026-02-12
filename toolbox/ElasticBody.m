@@ -1,10 +1,10 @@
 classdef ElasticBody  < Body
     properties
-        ElasticDOF (:,1) = []
+        ElasticDOF (:,1)
         sid SID
-        Fe (:, 1) = []
-        Fe_ext (:, 1) = []
-        e_p (:,:) = []
+        Fe (:, 1)
+        Fe_ext (:, 1)
+        e_p (:,:)
         ConstrLoads (1, :) cell = {}
         ChildFrame (1,:) double = []    % number of frame to which a child is attached
     end
@@ -29,6 +29,8 @@ classdef ElasticBody  < Body
             if nargin > 3
                 obj.Description = description;
             end
+
+            obj.Fe_ext = obj.system.sym(zeros(length(obj.ElasticDOF), 1));
         end
 
         % attach a body to one of this bodies frames
@@ -52,10 +54,10 @@ classdef ElasticBody  < Body
             else
                 obj.ConstrLoads{end+1} = {};
                 obj.ChildFrame(end+1) = -1;
-                z_load = [0 0 0]';
+                z_load = [0 0 0].';
             end
 
-            T_elast= obj.system.createSymbolic(eye(4));
+            T_elast= obj.system.sym(eye(4));
             T_elast(1:3, 4) = obj.sid.frame(iframe).origin.evalTaylor(obj.ElasticDOF, obj.system.sym_eps) + z_load;
             T_elast(1:3, 1:3) = Trot_elast(obj, iframe);
             body.T = T_elast * body.T; % pre-multiply because all body transformations come after the movement caused by being attached to the elastic body
@@ -74,7 +76,7 @@ classdef ElasticBody  < Body
         function applyElasticForce(obj, Fe)
             arguments
                 obj
-                Fe (:,1) msym
+                Fe (:,1) 
             end
 
             obj.Fe_ext = obj.Fe_ext + Fe;
@@ -167,7 +169,7 @@ classdef ElasticBody  < Body
             grav_local = rotationToLocal * (obj.a0 - obj.system.gravity);
             alpha_local = rotationToLocal * obj.alpha0;
 
-            obj.Fe = zeros(length(obj.ElasticDOF), 1);
+            obj.Fe = obj.system.sym(zeros(length(obj.ElasticDOF), 1));
 
             for ief = 1:length(obj.ElasticDOF)
                 obj.Fe(ief) = - Ct(ief, :) * grav_local;
@@ -222,7 +224,7 @@ classdef ElasticBody  < Body
                     constr_forces = obj.system.getConstraintForce(obj.ConstrLoads{i}, false);
                     for j = 1:length(obj.ElasticDOF)
                         % M0 is already considered by the coupling of bodies via T_elast
-                        e_force = obj.sid.frame(obj.ChildFrame(i)).phi.M1{j}' *constr_forces;
+                        e_force = obj.sid.frame(obj.ChildFrame(i)).phi.M1{j}.' *constr_forces;
                         obj.Fe = obj.Fe + e_force*obj.ElasticDOF(j)*obj.system.sym_eps;
                     end
                 end

@@ -3,33 +3,33 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         Name (1,:) char = ''
         Description (1,1) string = "No description"
 
-        T (:,:) = []                        % Homogeneous transformation matrix relative to parent. Multiply body coordinates with this matrix to get global coordinates
+        T                             % Homogeneous transformation matrix relative to parent. Multiply body coordinates with this matrix to get global coordinates
         children (1,:) Body = Body.empty         
         parent = []
         system (1,:) MultiBodySystem = MultiBodySystem.empty
 
-        T0 (:,:) = []                       % Homogeneous transformation matrix from inertial reference frame
-        v0 (3,1) = []
-        v0_z (3,1) = []                    % Velocity including movement in constraint direction
-        a0 (3,1) = []
-        omega0 (3,1) = []
-        omega0_z (3,1) = []                % Rotational velocity including movement in constraint direction
-        alpha0 (3,1) = []
-        v_p (3,:) = []
-        omega_p (3,:) = []
-        vz_p (3,:) = []                    % Partial velocities in constrain direction
-        omegaz_p (3,:) = []                % Partial rotational velocities in constrain direction
+        T0 (:,:)                      % Homogeneous transformation matrix from inertial reference frame
+        v0 (3,1)
+        v0_z (3,1)                    % Velocity including movement in constraint direction
+        a0 (3,1) 
+        omega0 (3,1)
+        omega0_z (3,1)                % Rotational velocity including movement in constraint direction
+        alpha0 (3,1) 
+        v_p (3,:)
+        omega_p (3,:)
+        vz_p (3,:)                    % Partial velocities in constrain direction
+        omegaz_p (3,:)                % Partial rotational velocities in constrain direction
 
-        F_ext (:, 1) = []
-        M_ext (:, 1) = []
+        F_ext (:, 1) 
+        M_ext (:, 1)
         
-        F (:, 1) = []
-        M (:, 1) = []
+        F (:, 1) 
+        M (:, 1)
 
-        Fgen (:, 1) = []
-        Fconstr (:, 1) = []                % Constraint forces
+        Fgen (:, 1) 
+        Fconstr (:, 1)                % Constraint forces
 
-        forcesPrepared = false              % replace this by a general locking/finalization of the entire system
+        forcesPrepared = false        % replace this by a general locking/finalization of the entire system
     end
 
     methods
@@ -44,10 +44,10 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             % Initialize with numeric matrices that will be converted to symbolic by the system
             obj.T = eye(4);
             obj.T0 = eye(4);
-            obj.F_ext = [0 0 0]';
-            obj.M_ext = [0 0 0]';
-            obj.F = [0 0 0]';
-            obj.M = [0 0 0]';
+            obj.F_ext = [0 0 0].';
+            obj.M_ext = [0 0 0].';
+            obj.F = [0 0 0].';
+            obj.M = [0 0 0].';
         end
 
         % Add a direct child
@@ -70,7 +70,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             if numel(vec) ~= 3
                 error("Translation vector must have 3 elements.");
             end
-            T_translate = obj.system.createSymbolic(eye(4));
+            T_translate = obj.system.sym(eye(4));
             T_translate(1:3,4) = vec;
             obj.T = obj.T * T_translate;
         end
@@ -117,7 +117,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             v_abs = obj.T0(1:3, 1:3) * v_rel;
             a_abs = obj.T0(1:3, 1:3) * a_rel;
         
-            abs_accel = simplify(obj.a0 + crossmat(obj.alpha0)*r_abs + crossmat(obj.omega0)*(crossmat(obj.omega0)*r_abs) + 2*crossmat(obj.omega0)*v_abs + a_abs);
+            abs_accel = obj.system.simplify(obj.a0 + crossmat(obj.alpha0)*r_abs + crossmat(obj.omega0)*(crossmat(obj.omega0)*r_abs) + 2*crossmat(obj.omega0)*v_abs + a_abs);
         end
 
         % calculate kinematics
@@ -125,36 +125,36 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             obj.v0= diff(obj.T0(1:3, 4), obj.system.time);
             obj.v0_z = obj.v0;
             % store with and remove movement inconstraint directions
-            obj.v0= subs(obj.v0, struct2array(obj.system.doc), 0);
+            obj.v0 = obj.system.removeDOC(obj.v0);
 
             obj.a0= diff(obj.v0, obj.system.time);
 
-            w_skew= simplify(diff(obj.T0(1:3, 1:3), obj.system.time)*obj.T0(1:3, 1:3).');
-            obj.omega0= [(w_skew(3, 2)-w_skew(2, 3))/obj.system.createSymbolic(2); (w_skew(1, 3)-w_skew(3, 1))/obj.system.createSymbolic(2); (w_skew(2, 1)-w_skew(1, 2))/obj.system.createSymbolic(2)];
-            obj.omega0= simplify(obj.system.removeEps(obj.omega0, true));
+            w_skew= obj.system.simplify(diff(obj.T0(1:3, 1:3), obj.system.time)*obj.T0(1:3, 1:3).');
+            obj.omega0= [(w_skew(3, 2)-w_skew(2, 3))/obj.system.sym(2); (w_skew(1, 3)-w_skew(3, 1))/obj.system.sym(2); (w_skew(2, 1)-w_skew(1, 2))/obj.system.sym(2)];
+            obj.omega0= obj.system.simplify(obj.system.removeEps(obj.omega0, true));
             % store with and remove movement inconstraint directions
             obj.omega0_z= obj.omega0;
-            obj.omega0 = subs(obj.omega0, struct2array(obj.system.doc), 0);
+            obj.omega0 = obj.system.removeDOC(obj.omega0);
 
             obj.alpha0= diff(obj.omega0, obj.system.time);
 
             % Partial velocities
             % TODO: add explanation, why eps is removed here
-            obj.v_p= simplify(subs(jacobian(obj.v0, diff(obj.system.q, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]));
-            obj.omega_p= simplify(subs(jacobian(obj.omega0, diff(obj.system.q, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]));
+            obj.v_p= obj.system.simplify(obj.system.keepEps(jacobian(obj.v0, diff(obj.system.q, obj.system.time))));
+            obj.omega_p= obj.system.simplify(obj.system.keepEps(jacobian(obj.omega0, diff(obj.system.q, obj.system.time))));
 
-            obj.vz_p= subs(jacobian(obj.v0_z, diff(obj.system.z, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]);
-            obj.vz_p= simplify(subs(obj.vz_p, struct2array(obj.system.doc), 0));
+            obj.vz_p= obj.system.keepEps(jacobian(obj.v0_z, diff(obj.system.z, obj.system.time)));
+            obj.vz_p= obj.system.simplify(obj.system.removeDOC(obj.vz_p));
 
-            obj.omegaz_p= subs(jacobian(obj.omega0_z, diff(obj.system.z, obj.system.time)), [obj.system.sym_eps, obj.system.sym_eps_rot], [1, 1]);
-            obj.omegaz_p= simplify(subs(obj.omegaz_p, struct2array(obj.system.doc), 0));
+            obj.omegaz_p= obj.system.keepEps(jacobian(obj.omega0_z, diff(obj.system.z, obj.system.time)));
+            obj.omegaz_p= obj.system.simplify(obj.system.removeDOC(obj.omegaz_p));
 
             for i= 1:length(obj.children)
                 obj.children(i).T0= obj.T0 * obj.children(i).T;
                 obj.children(i).prepareKinematics;
             end
 
-            obj.T0= subs(obj.T0, struct2array(obj.system.doc), 0);
+            obj.T0= obj.system.removeDOC(obj.T0);
         end
 
         function prepareForces(obj)
@@ -163,13 +163,13 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function calcGenForce(obj)
             obj.Fgen = - obj.v_p.' * (obj.F + obj.F_ext);
             obj.Fgen = obj.Fgen - obj.omega_p.' * (obj.M + obj.M_ext);
-            obj.Fgen = simplify(obj.Fgen);
+            obj.Fgen = obj.system.simplify(obj.Fgen);
         end
 
         function calcConstrForce(obj)
             obj.Fconstr = obj.vz_p.' * (obj.F + obj.F_ext);
             obj.Fconstr = obj.Fconstr + obj.omegaz_p.' * (obj.M + obj.M_ext);
-            obj.Fconstr = simplify(obj.Fconstr);
+            obj.Fconstr = obj.system.simplify(obj.Fconstr);
         end
 
         function Fgen = collectGenForces(obj)
@@ -204,7 +204,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function applyForce(obj, F)
             arguments
                 obj
-                F (3,1) msym
+                F (3,1) 
             end
             obj.F_ext = obj.F_ext + F;
         end
@@ -213,7 +213,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function applyMoment(obj, M)
             arguments
                 obj
-                M (3,1) msym
+                M (3,1) 
             end
             obj.M_ext = obj.M_ext + M;
         end
@@ -223,7 +223,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function forceBetween(obj, F, b2)
             arguments
                 obj
-                F (3,1) msym
+                F (3,1) 
                 b2 (1,1) Body
             end
             obj.applyForce(F)
@@ -235,7 +235,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function momentBetween(obj, M, b2)
             arguments
                 obj
-                M (3,1) msym
+                M (3,1) 
                 b2 (1,1) Body
             end
             obj.applyMoment(M)
@@ -247,8 +247,8 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function applyForceInLocal(obj, r, F)
             arguments
                 obj
-                r (3,1) msym         % position relative to center of mass or reference system in body local coordinates
-                F (3,1) msym         % force in body local coordinates
+                r (3,1)          % position relative to center of mass or reference system in body local coordinates
+                F (3,1)          % force in body local coordinates
             end
             % make sure T0 is already available
             obj.system.checkSetupCompleted()
@@ -263,15 +263,13 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         function applyForceIn0(obj, r0, F0)
             arguments
                 obj
-                r0 (3,1) msym         % position relative to center of mass or reference system in global coordinates
-                F0 (3,1) msym         % force in global coordinates
+                r0 (3,1)          % position relative to center of mass or reference system in global coordinates
+                F0 (3,1)          % force in global coordinates
             end
             obj.applyForce(F0)
             obj.applyMoment(crossmat(r0)*F0)
-        end        
-    end
+        end
 
-    methods (Static)
         % Rodrigues' formula for rotation matrix and wrap into 4x4
         function T = rotationMatrix(obj, axis, angle)
             if ischar(axis)
@@ -295,10 +293,12 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                  y*x*C + z*s, y*y*C + c,     y*z*C - x*s;
                  z*x*C - y*s, z*y*C + x*s, z*z*C + c];
 
-            T = obj.system.createSymbolic(eye(4));
+            T = obj.system.sym(eye(4));
             T(1:3,1:3) = R;
         end
-        
+    end
+
+    methods (Static)
         function mustBeNumericOrSym(val)
             if ~(isnumeric(val) || isa(val,'msym') || isa(val,'sym'))
                 error('Value must be numeric or symbolic.');

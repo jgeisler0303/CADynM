@@ -5,15 +5,11 @@ classdef Parameters < handle
         param_dims struct = struct()
         param_struct struct = struct()
         param_values struct = struct()
-        system = []                         % Reference to parent MultiBodySystem for symbolic operations
+        system                           % Reference to parent MultiBodySystem for symbolic operations
     end
 
     methods
         function obj = Parameters(param_struct_, system)
-            arguments
-                param_struct_ struct = []
-                system = []
-            end
             obj.system = system;
             if ~isempty(param_struct_)
                 obj.setParamRefStruct(param_struct_);
@@ -54,11 +50,7 @@ classdef Parameters < handle
                 end
             else
                 % Use system's createSymbolic if available, otherwise default to msym
-                if ~isempty(obj.system)
-                    sym_var = obj.system.createSymbolic(name, 'real');
-                else
-                    sym_var = msym(name, 'real');
-                end
+                sym_var = obj.system.sym(name);
                 
                 if ~isempty(dims)
                     obj.param_syms.(name) = sym_var;

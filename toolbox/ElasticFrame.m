@@ -20,14 +20,14 @@ classdef ElasticFrame  < handle
         %   name: name string for the frame (optional, default = '')
         %
         % Calling convention 2: Initialize from frame struct
-        %   obj = ElasticFrame(frame_struct, name, tol, params)
+        %   obj = ElasticFrame(frame_struct, name, tol, system)
         %
         %   frame_struct: struct with frame data (node, rframe, Phi, Psi, 
         %                 AP, sigma, origin)
         %   name: base name for generated parameters
         %   tol: relative tolerance for parameter generation (scalar or 
         %        [rel_tol, abs_tol])
-        %   params: object with addParameter method callback
+        %   system: object with addParameter method callback
         %
         function obj = ElasticFrame(varargin)
             if nargin == 0
@@ -41,7 +41,7 @@ classdef ElasticFrame  < handle
                 frame_struct = arg1;
                 name = '';
                 tol = 0;
-                params = [];
+                system = [];
                 
                 if nargin >= 2
                     name = varargin{2};
@@ -50,18 +50,17 @@ classdef ElasticFrame  < handle
                     tol = varargin{3};
                 end
                 if nargin >= 4
-                    params = varargin{4};
+                    system = varargin{4};
                 end
                 
                 obj.name = frame_struct.node;
                 obj.rframe = frame_struct.rframe;
-                obj.phi = ElasticTaylor(frame_struct.Phi, 0, tol, [name '_phi'], params);
+                obj.phi = ElasticTaylor(frame_struct.Phi, 0, tol, [name '_phi'], system);
 
                 % Compute origin.M1 from phi to reuse parameter symbols
                 frame_struct.origin.M1 = arrayfun(@(i)obj.phi.M0(:, i), 1:size(obj.phi.M0, 2), UniformOutput=false);
-                obj.origin = ElasticTaylor(frame_struct.origin, 0, tol, [name '_origin'], params);
-
-                obj.psi = ElasticTaylor(frame_struct.Psi, 0, tol, [name '_psi'], params);
+                obj.origin = ElasticTaylor(frame_struct.origin, 0, tol, [name '_origin'], system);
+                obj.psi = ElasticTaylor(frame_struct.Psi, 0, tol, [name '_psi'], system);
 
                 % Compute AP.M1 from psi using cross-product matrix to reuse parameter symbols
                 frame_struct.AP.M1 = arrayfun(@(i)crossmat(obj.psi.M0(:, i)), 1:size(obj.psi.M0, 2), UniformOutput=false);
@@ -69,8 +68,8 @@ classdef ElasticFrame  < handle
                 if ~all(frame_struct.AP.M0==eye(3))
                     error('Frame node orientation must always be a unit matrix.')
                 end
-                obj.ap = ElasticTaylor(frame_struct.AP, 0, tol, [name '_ap'], params);
-                obj.sigma = ElasticTaylor(frame_struct.sigma, 0, tol, [name '_sigma'], params);
+                obj.ap = ElasticTaylor(frame_struct.AP, 0, tol, [name '_ap'], system);
+                obj.sigma = ElasticTaylor(frame_struct.sigma, 0, tol, [name '_sigma'], system);
             else
                 % Calling convention 1: Direct initialization
                 nelastq = arg1;

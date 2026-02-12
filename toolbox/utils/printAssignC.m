@@ -2,7 +2,7 @@ function ij_ = printAssignC(indent, name, var, type, selector)
 arguments
     indent
     name {mustBeTextScalar}
-    var msym
+    var 
     type {mustBeTextScalar}
     selector function_handle = @(x) true
 end

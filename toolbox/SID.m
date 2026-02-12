@@ -23,12 +23,11 @@ classdef SID  < handle
         % Constructor - supports two calling conventions
         %
         % Calling convention 1: Direct initialization
-        %   obj = SID(nedof, n_frames, name, system)
+        %   obj = SID(nedof, n_frames, name)
         %
         %   nedof: number of elastic degrees of freedom
         %   n_frames: number of frames (optional, default = 0)
         %   name: name string for the SID object (optional, default = '')
-        %   system: system object for parameter management (optional, default = [])
         %
         % Calling convention 2: Initialize from SID struct
         %   obj = SID(sid_struct, tolerance, name, system)
@@ -39,7 +38,7 @@ classdef SID  < handle
         %              [rel_tol, abs_tol]). If non-zero, values are converted 
         %              to parameters
         %   name: base name for generated parameters
-        %   params: object with addParameter method callback
+        %   system: object with addParameter method callback
         %
         function obj = SID(varargin)
             if nargin == 0
@@ -51,13 +50,13 @@ classdef SID  < handle
             if isstruct(arg1)
                 % Calling convention 2: Initialize from struct
                 if nargin < 4
-                    error('When using struct initialization, provide all required arguments: SID(sid_struct, tolerance, name, params)');
+                    error('When using struct initialization, provide all required arguments: SID(sid_struct, tolerance, name, system)');
                 end
                 
                 sid_struct = arg1;
                 tol = varargin{2};
                 name = varargin{3};
-                params = varargin{4};
+                system = varargin{4};
                 
                 obj.name = name;
                 obj.nelastq = sid_struct.refmod.nelastq; % nq
@@ -65,30 +64,30 @@ classdef SID  < handle
                 obj.ielastq = sid_struct.refmod.ielastq;
                 
                 if ~all(tol==0)
-                    obj.mass = params.addParameter([name '_mass'], [], sid_struct.refmod.mass);
+                    obj.mass = system.addParameter([name '_mass'], [], sid_struct.refmod.mass);
                 else
                     obj.mass = sid_struct.refmod.mass;
                 end
     
                 for i = 1:length(sid_struct.frame)
-                    obj.frame(i) = ElasticFrame(sid_struct.frame(i), sprintf('%s_frame_%d', name, i), tol, params);
+                    obj.frame(i) = ElasticFrame(sid_struct.frame(i), sprintf('%s_frame_%d', name, i), tol, system);
                 end
                 
-                obj.Ct = ElasticTaylor(sid_struct.Ct, 0, tol, [name '_Ct'], params);
-                obj.Cr = ElasticTaylor(sid_struct.Cr, 0, tol, [name '_Cr'], params);
+                obj.Ct = ElasticTaylor(sid_struct.Ct, 0, tol, [name '_Ct'], system);
+                obj.Cr = ElasticTaylor(sid_struct.Cr, 0, tol, [name '_Cr'], system);
                 
                 % Compute md.M1 from Ct to reuse parameter symbols 
                 M = obj.Ct.M0';
                 sid_struct.md.M1 = arrayfun(@(i)M(:, i), 1:size(M, 2), UniformOutput=false);
-                obj.md = ElasticTaylor(sid_struct.md, 0, tol, [name '_md'], params);
+                obj.md = ElasticTaylor(sid_struct.md, 0, tol, [name '_md'], system);
                 
-                obj.I = ElasticTaylor(sid_struct.I, 0, tol, [name '_I'], params);
-                obj.Me = ElasticTaylor(sid_struct.Me, 0, tol, [name '_Me'], params);
-                obj.Gr = ElasticTaylor(sid_struct.Gr, obj.nelastq, tol, [name '_Gr'], params);
-                obj.Ge = ElasticTaylor(sid_struct.Ge, obj.nelastq, tol, [name '_Ge'], params);
-                obj.Oe = ElasticTaylor(sid_struct.Oe, 0, tol, [name '_Oe'], params);
-                obj.Ke = ElasticTaylor(sid_struct.Ke, 0, tol, [name '_K'], params);
-                obj.De = ElasticTaylor(sid_struct.De, 0, tol, [name '_D'], params);
+                obj.I = ElasticTaylor(sid_struct.I, 0, tol, [name '_I'], system);
+                obj.Me = ElasticTaylor(sid_struct.Me, 0, tol, [name '_Me'], system);
+                obj.Gr = ElasticTaylor(sid_struct.Gr, obj.nelastq, tol, [name '_Gr'], system);
+                obj.Ge = ElasticTaylor(sid_struct.Ge, obj.nelastq, tol, [name '_Ge'], system);
+                obj.Oe = ElasticTaylor(sid_struct.Oe, 0, tol, [name '_Oe'], system);
+                obj.Ke = ElasticTaylor(sid_struct.Ke, 0, tol, [name '_K'], system);
+                obj.De = ElasticTaylor(sid_struct.De, 0, tol, [name '_D'], system);
             else
                 % Calling convention 1: Direct initialization
                 nelastq = arg1; % number of elastic DOF (nq)

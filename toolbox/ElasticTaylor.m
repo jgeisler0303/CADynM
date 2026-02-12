@@ -40,7 +40,7 @@ classdef ElasticTaylor  < handle
         %   nelem: number of elements
         %   tol: tolerance (scalar relative tolerance or [rel_tol, abs_tol])
         %   name: base name for generated parameters
-        %   params: system object with addParameter method callback
+        %   system: system object with addParameter method callback
         %
         function obj = ElasticTaylor(varargin)
             if nargin < 3
@@ -48,13 +48,13 @@ classdef ElasticTaylor  < handle
             elseif isstruct(varargin{1})
                 % Calling convention 2: Initialize from struct
                 if nargin~=5
-                    error('When initializing from struct, five arguments are needed: taylor_struct, nelem, tol, name, params')
+                    error('When initializing from struct, five arguments are needed: taylor_struct, nelem, tol, name, system')
                 end
                 taylor_struct = varargin{1};
                 nelem = varargin{2};
                 tol = varargin{3};
                 name = varargin{4};
-                params = varargin{5};
+                system = varargin{5};
                 
                 obj.order = taylor_struct.order;
                 obj.nrow = taylor_struct.nrow;
@@ -89,11 +89,11 @@ classdef ElasticTaylor  < handle
                 else
                     M0_ = taylor_struct.M0;
                 end
-                obj.M0 = obj.setElements(M0_, 0, tol, [name '0'], params);
+                obj.M0 = obj.setElements(M0_, 0, tol, [name '0'], system);
 
                 % TODO: check structure for M1
                 if obj.order>0
-                    obj.M1 = obj.setElements(taylor_struct.M1, 1, tol, [name '1'], params);
+                    obj.M1 = obj.setElements(taylor_struct.M1, 1, tol, [name '1'], system);
                 end
             else
                 % Calling convention 1: Direct initialization with individual parameters
@@ -195,7 +195,7 @@ classdef ElasticTaylor  < handle
                 abs_tol = tol(2);
             end
 
-            % rel_toll==0 means we keep the numbers
+            % rel_tol==0 means we keep the numbers
             if rel_tol==0
                 if order==1 && obj.nelem>0
                     error('4-dimensional M1 not supported in ElasticTaylor initialization.')
@@ -223,13 +223,13 @@ classdef ElasticTaylor  < handle
                 if order==1 && obj.nelem>0
                     error('4-dimensional M1 not supported in ElasticTaylor initialization.')
                     % [R,C] = meshgrid(1:size(M_, 3), 1:size(M_, 4));
-                    % M = arrayfun(@(r,c)system.createSymbolic(M_(:,:,r,c)), R, C, UniformOutput=false);
+                    % M = arrayfun(@(r,c)system.sym(M_(:,:,r,c)), R, C, UniformOutput=false);
                 elseif order==1 || obj.nelem>0
                     % M0 with nelem>0 or M1 with nelem=0
-                    M = arrayfun(@(r)system.createSymbolic(M_(:,:,r)), 1:size(M_, 3), UniformOutput=false);
+                    M = arrayfun(@(r)system.sym(M_(:,:,r)), 1:size(M_, 3), UniformOutput=false);
                 else
                     % M0 with nelem=0
-                    M = system.createSymbolic(M_);
+                    M = system.sym(M_);
                 end
 
                 params_idx_lin = find(params_idx);

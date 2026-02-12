@@ -69,13 +69,13 @@ makeCasADiNamedVector('externals', externalNames, [], 1, 0);
 {{
     f_impl = temp_data.replaceVars(temp_data.getImplStateSpaceODE(true));
 
-    [opt, tnames, tvalues] = optimize(f_impl);
+    [opt, tnames, tvalues] = temp_data.optimize(f_impl);
     for i = 1:length(tnames)
         printAssignC('', char(tnames(i)), tvalues(i), 'scalar')
     end
     if ~isempty(tnames), fprintf("\n"); end
     
-    printAssignC(0, 'f', opt, 'numbered')
+    printAssignC(0, 'f', opt{1}, 'numbered')
     
     fprintf('\n%% Implicit Nonlinear State-Space Model\n')
     fprintf('f_impl_expr= [');
@@ -92,13 +92,13 @@ makeCasADiNamedVector('externals', externalNames, [], 1, 0);
 {{ 
     y = temp_data.replaceVars(struct2array(temp_data.outputs));
     
-    [opt, tnames, tvalues] = optimize(y);
+    [opt, tnames, tvalues] = temp_data.optimize(y);
     for i = 1:length(tnames)
         printAssignC('', char(tnames(i)), tvalues(i), 'scalar')
     end
     if ~isempty(tnames), fprintf("\n"); end
     
-    printAssignC(0, 'sym_y', opt, 'numbered')
+    printAssignC(0, 'sym_y', opt{1}, 'numbered')
     
     fprintf('\nsym_y= [');
     for i = 1:length(y)

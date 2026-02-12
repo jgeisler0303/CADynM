@@ -1,7 +1,7 @@
 classdef RigidBody  < Body
     properties
-        m (:,1) msym = []               % Mass
-        I (:,:) msym = []               % Inertia matrix
+        m (:,1)                % Mass
+        I (:,:)                % Inertia matrix
     end
 
     methods
