@@ -280,14 +280,13 @@ void {{ fprintf("%s", temp_data.Name); }}::precalcConsts() {
 {{
     eom = temp_data.replaceVars(temp_data.getEOM(true), 'cpp');
     
-    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', eom);
-    opt = opt(1);
+    [opt, tnames, tvalues] = temp_data.optimize(eom);
     for i = 1:length(tnames)
         printAssignC('        real_type ', char(tnames(i)), tvalues(i), 'scalar')
     end
     if ~isempty(tnames), fprintf("\n"); end
     
-    printAssignC(8, 'f_', opt, 'vector_par')
+    printAssignC(8, 'f_', opt{1}, 'vector_par')
 }}    }
 
     return f_;
@@ -323,21 +322,20 @@ void {{ fprintf("%s", temp_data.Name); }}::calcJacobian(real_type alphaM, real_t
         end
     end
 
-    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', [eom M C K]);
-    opt = opt(1);
+    [opt, tnames, tvalues] = temp_data.optimize(eom, M, C, K);
     for i = 1:length(tnames)
         printAssignC('        real_type ', char(tnames(i)), tvalues(i), 'scalar')
     end
     if ~isempty(tnames), fprintf("\n"); end
         
-    n = printAssignC(8, 'M', opt(:, (1:n_dof_aux)+1), 'matrix', not_const_selector);
+    n = printAssignC(8, 'M', opt{2}, 'matrix', not_const_selector);
     if n>0, fprintf("\n"); end
-    n = printAssignC(8, 'C', opt(:, (1:n_dof_aux)+1+n_dof_aux), 'matrix', not_const_selector);
+    n = printAssignC(8, 'C', opt{3}, 'matrix', not_const_selector);
     if n>0, fprintf("\n"); end
-    n = printAssignC(8, 'K', opt(:, (1:n_dof_aux)+1+2*n_dof_aux), 'matrix', not_const_selector);
+    n = printAssignC(8, 'K', opt{4}, 'matrix', not_const_selector);
     if n>0, fprintf("\n"); end
 
-    printAssignC(8, 'f', opt(:, 1), 'vector_par')
+    printAssignC(8, 'f', opt{1}, 'vector_par')
 }}    }
     
     Jacobian = alphaM*M + alphaC*C + alphaK*K;
@@ -365,21 +363,20 @@ void {{ fprintf("%s", temp_data.Name); }}::calcB() {
         end
     end
 
-    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', B);
-    opt = opt(1);
+    [opt, tnames, tvalues] = temp_data.optimize(B);
     for i = 1:length(tnames)
-        printAssignC('        real_type ', char(tnames(i)), tvalues(i), 'scalar')
+        printAssignC('    real_type ', char(tnames(i)), tvalues(i), 'scalar')
     end
     if ~isempty(tnames), fprintf("\n"); end
     
-    printAssignC(4, 'B', opt, 'matrix', not_const_selector)
+    printAssignC(4, 'B', opt{1}, 'matrix', not_const_selector)
 }}}
 
 void {{ fprintf("%s", temp_data.Name); }}::calcCDF() {
 {{ 
     not_const_selector = @(e)~temp_data.isConstant(e, 'cpp');
     
-    y = temp_data.replaceVars(struct2array(temp_data.outputs), 'cpp')';
+    y = temp_data.replaceVars(struct2array(temp_data.outputs), 'cpp').';
     CD = temp_data.replaceVars(temp_data.getCD(true), 'cpp');
     F = temp_data.replaceVars(temp_data.getF(true), 'cpp');
     
@@ -396,32 +393,30 @@ void {{ fprintf("%s", temp_data.Name); }}::calcCDF() {
         end
     end
 
-    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', [y CD F]);
-    opt = opt(1);
+    [opt, tnames, tvalues] = temp_data.optimize(y, CD, F);
     for i = 1:length(tnames)
         printAssignC('        real_type ', char(tnames(i)), tvalues(i), 'scalar')
     end
     if ~isempty(tnames), fprintf("\n"); end
     
-    n = printAssignC(4, 'y', opt(:, 1), 'vector_par');
+    n = printAssignC(4, 'y', opt{1}, 'vector_par');
     if n>0, fprintf("\n"); end
-    n = printAssignC(4, 'CD', opt(:, 2:(2*temp_data.getNumDOF()+2*temp_data.getNumAux()+temp_data.getNumIn())+1), 'matrix', not_const_selector);
+    n = printAssignC(4, 'CD', opt{2}, 'matrix', not_const_selector);
     if n>0, fprintf("\n"); end
-    printAssignC(4, 'F', opt(:, (2*temp_data.getNumDOF()+2*temp_data.getNumAux()+temp_data.getNumIn()+1+1):end), 'matrix', not_const_selector)
+    printAssignC(4, 'F', opt{3}, 'matrix', not_const_selector)
 }}}
 
 void {{ fprintf("%s", temp_data.Name); }}::calcOut() {
 {{ 
     y = temp_data.replaceVars(struct2array(temp_data.outputs), 'cpp');
     
-    [tvalues, opt, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', y);
-    opt = opt(1);
+    [opt, tnames, tvalues] = temp_data.optimize(y);
     for i = 1:length(tnames)
         printAssignC('        real_type ', char(tnames(i)), tvalues(i), 'scalar')
     end
     if ~isempty(tnames), fprintf("\n"); end
     
-    printAssignC(4, 'y', opt, 'vector_par')
+    printAssignC(4, 'y', opt{1}, 'vector_par')
 }}}
 
 {{ 

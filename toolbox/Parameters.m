@@ -5,13 +5,12 @@ classdef Parameters < handle
         param_dims struct = struct()
         param_struct struct = struct()
         param_values struct = struct()
+        system                           % Reference to parent MultiBodySystem for symbolic operations
     end
 
     methods
-        function obj = Parameters(param_struct_)
-            arguments
-                param_struct_ struct = []
-            end
+        function obj = Parameters(param_struct_, system)
+            obj.system = system;
             if ~isempty(param_struct_)
                 obj.setParamRefStruct(param_struct_);
             end
@@ -50,11 +49,14 @@ classdef Parameters < handle
                     error('Trying to set value of dimension %s to parameter of dimension %s.', mat2str(size(value)), mat2str(obj.param_dims.(name)))
                 end
             else
+                % Use system's createSymbolic if available, otherwise default to msym
+                sym_var = obj.system.sym(name);
+                
                 if ~isempty(dims)
-                    obj.param_syms.(name) = sym(name, 'real');
+                    obj.param_syms.(name) = sym_var;
                     obj.param_dims.(name) = dims;
                 else
-                    obj.param_syms.(name) = sym(name, 'real');
+                    obj.param_syms.(name) = sym_var;
                     obj.param_dims.(name) = [1 1];
                 end
             end

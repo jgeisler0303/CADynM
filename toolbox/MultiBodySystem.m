@@ -1,15 +1,15 @@
 classdef MultiBodySystem  < handle
     properties
         Name (1,1) string = "UnnamedSystem"
-        gravity (3,1) sym = 0
+        gravity
         bodies struct = struct()                % All bodies in the system
-        time (1,1) sym = sym('time', 'real')
+        time
         dof struct = struct()                   % Degrees of freedom
         dof_idx struct = struct()        
-        q (:,1) sym = []
+        q
         doc struct = struct()                   % Degrees of constraint
         doc_idx struct = struct()               % Constraintforces are calculated in the direction of these coordinates
-        z (:,1) sym = []                        % Constraint coordinates
+        z                                       % Constraint coordinates
         inputs struct = struct()
         externals struct = struct()             % Externally calculated value that may depend on inputs and states
         external_deps struct = struct()         % Dependencies of the external
@@ -17,42 +17,54 @@ classdef MultiBodySystem  < handle
 
         outputs struct = struct()
 
-        params Parameters = []
+        params Parameters
 
         attached_bodies (1,:) Body = Body.empty % Bodies attached to the inertial frame
 
         aux_state struct = struct()             % auxiliary state names
-        aux_impl_ode (:,1) sym = []             % auxiliary implicit first order ode        
+        aux_order struct = struct()             % order = max derivative of each state, currently only first order is supported
+        aux_impl_ode                            % auxiliary implicit first order ode        
 
         setupCompleted = false                  % set to true once model is finished an no further data can be added
 
-        eom (:,1) sym = []
-        Fz (:,1) sym = []                       % cash for calculated constraint forces
-        M (:,:) sym = []
-        C (:,:) sym = []
-        K (:,:) sym = []
-        B (:,:) sym = []
-        CD (:,:) sym = []
-        F (:,:) sym = []
+        eom
+        Fz                                      % cache for calculated constraint forces
+        M
+        C 
+        K 
+        B 
+        CD 
+        F
 
-        keep_dof logical = []                   % cache for positional states that are not unused
+        keep_positional_states logical = []     % cache for positional states that are not unused
         aux_ode_first_order logical = []        % cache for test result, if all aux ODEs are first order
-    end
 
-    properties (Access = private)
+        sym_eps                                 % variable to control cross terms of small (elastic) deformations
+        sym_eps_rot                             % variable to control cross terms of small (elastic) rotations
     end
 
     methods
-        % Constructor with optional name
+        % Constructor with optional name and symbolic backend
+        % symbolicBackend: 'sym' for MATLAB Symbolic Toolbox, 'msym' for MAMaS/Maxima (default)
         function obj = MultiBodySystem(name, dof, input)
-            obj.params = Parameters();
-            if nargin > 0
+            % Initialize symbolic variables based on selected backend
+            % we have to assign it here, otherwise it may be the same for all instances
+            obj.gravity = obj.sym([0 0 0]');
+            obj.time = obj.sym('time');
+            obj.sym_eps = obj.sym('eps');
+            obj.sym_eps_rot = obj.sym('eps_rot');
+            obj.q = obj.sym([]);
+            obj.z = obj.sym([]);
+
+            % Pass system reference to Parameters so it can use the correct backend
+            obj.params = Parameters([], obj);
+            if nargin > 0 && ~isempty(name)
                 obj.Name = string(name);
             end
-            if nargin>1
+            if nargin > 1 && ~isempty(dof)
                 obj.addGeneralizedCoordinate(dof)
             end
-            if nargin>2
+            if nargin > 2 && ~isempty(input)
                 obj.addInput(input)
             end
         end
@@ -72,19 +84,10 @@ classdef MultiBodySystem  < handle
             end
 
             obj.checkSetupNotCompleted();
-            obj.checkName(coordName)
+
+            [obj.dof.(coordName), obj.dof.([coordName '_d']), obj.dof.([coordName '_dd'])] = createDerivatives(obj, coordName);
     
-            % Define symbolic variable dynamically
-            save_assumptions = assumptions;
-            symFun = str2sym([coordName '(time)']);
-            assumptions(save_assumptions); % str2sym deletes old assumtions
-            assumeAlso(symFun, 'real')
-    
-            % Store it
-            obj.dof.(coordName) = symFun;
-            obj.dof.([coordName '_d']) = diff(symFun, obj.time);
-            obj.dof.([coordName '_dd']) = diff(symFun, obj.time, 2);
-            obj.q(end+1,1) = symFun;
+            obj.q(end+1,1) = obj.dof.(coordName);
             obj.dof_idx.(coordName) = length(obj.q);
         end
 
@@ -105,19 +108,9 @@ classdef MultiBodySystem  < handle
             end
     
             obj.checkSetupNotCompleted();
-            obj.checkName(coordName)
+            [obj.doc.(coordName), obj.doc.([coordName '_d']), obj.doc.([coordName '_dd'])] = createDerivatives(obj, coordName);
     
-            % Define symbolic variable dynamically
-            save_assumptions = assumptions;
-            symFun = str2sym([coordName '(time)']);
-            assumptions(save_assumptions); % str2sym deletes the original assumptions
-            assumeAlso(symFun, 'real')
-
-            % Store it
-            obj.doc.(coordName) = symFun;
-            obj.doc.([coordName '_d']) = diff(symFun, obj.time);
-            obj.doc.([coordName '_dd']) = diff(symFun, obj.time, 2);
-            obj.z(end+1,1) = symFun;
+            obj.z(end+1,1) = obj.doc.(coordName);
             obj.doc_idx.(coordName) = length(obj.z);
         end
 
@@ -192,20 +185,20 @@ classdef MultiBodySystem  < handle
             obj.checkSetupNotCompleted();
             obj.checkName(inName)
     
-            % Define symbolic variable dynamically
-            symVar = sym(inName, 'real');
-            assume(symVar, 'real')
+            % Define symbolic variable dynamically using backend abstraction
+            symVar = obj.sym(inName);
+            % TODO: consider time derivatives?
     
             % Store it
             obj.inputs.(inName) = symVar;
         end
 
-        % Add input by name
+        % Add output by name
         function addOutput(obj, outName, expr)
             arguments
                 obj
                 outName { mustBeTextScalar }
-                expr (1,1) sym
+                expr
             end
             
             if isfield(obj.outputs, outName)
@@ -219,21 +212,14 @@ classdef MultiBodySystem  < handle
             arguments
                 obj
                 extName (1,:) char
-                depends (1,:) sym = []
+                depends = []
             end
     
             obj.checkSetupNotCompleted();            
             checkName(obj, extName)
     
-            % Define symbolic variable dynamically
-            if isempty(depends)
-                symFun = sym(extName, 'real');
-            else
-                save_assumptions = assumptions;
-                symFun = str2sym(string(extName) + "(" + join(string(depends), ',') + ")");
-                assumptions(save_assumptions); % str2sym deletes the original assumptions
-                assumeAlso(symFun, 'real')
-            end
+            % Define symbolic variable dynamically using backend abstraction
+            symFun = obj.sym(extName, depends);
     
             % Store it
             obj.externals.(extName) = symFun;
@@ -241,29 +227,32 @@ classdef MultiBodySystem  < handle
         end
 
         % Add auxilliary state by name
-        function addAuxState(obj, auxName)
+        function addAuxState(obj, auxName, order)
             arguments
                 obj
                 auxName { MultiBodySystem.mustBeNonemptyCharOrCell }
+                order (:,1) double = 1
             end
             if iscell(auxName)
                 for i = 1:length(auxName)
-                    obj.addAuxState(auxName{i})
+                    obj.addAuxState(auxName{i}, order(i))
                 end
                 return
             end
-    
+            if order>1
+                error('Only first order auxilliary ODEs are currently supported.')
+            end
+
             obj.checkSetupNotCompleted();
             obj.checkName(auxName)
     
-            % Define symbolic variable dynamically
-            save_assumptions = assumptions;
-            symFun = str2sym([auxName '(time)']);
-            assumptions(save_assumptions); % str2sym deletes the original assumptions
-            assumeAlso(symFun, 'real')
+            % Define symbolic variable dynamically using backend abstraction
+            % TODO: use getDerivatives here too, somehow manage number of used derivatives
+            symFun = obj.sym(auxName, obj.time);
 
             % Store it
             obj.aux_state.(auxName) = symFun;
+            obj.aux_order.(auxName) = order;
         end
 
         % Add auxilliary state by name
@@ -342,16 +331,20 @@ classdef MultiBodySystem  < handle
         function dx = getTimeDeriv(obj, var, order)
             arguments
                 obj
-                var (:,1) sym
+                var
                 order (1,1) double = 1
             end
-
+            if any(ismember(var, struct2array(obj.aux_state)))
+                if any(arrayfun(@(v)order>obj.aux_order.(v.identifier)), var)
+                    error('Requested derivative order exceeds defined order for this auxilliary state for (one of) "%s".', string(var))
+                end
+            end
             dx = diff(var, obj.time, order);
         end
 
         function x = getAuxState(obj, ii)
             fn = fieldnames(obj.aux_state);
-            x = sym.empty;
+            x = obj.sym([]);
             for i = ii
                 x(end+1) = obj.aux_state.(fn{i});
             end
@@ -371,7 +364,6 @@ classdef MultiBodySystem  < handle
                 obj 
                 eliminate_unused (1,1) logical = false
             end
-            obj.checkAuxODEFirstOrder()
 
             if eliminate_unused
                 keep_dof_ = obj.getUsedPositionalStates();
@@ -511,7 +503,6 @@ classdef MultiBodySystem  < handle
                 eliminate_unused (1,1) logical = false
             end
             
-            obj.checkAuxODEFirstOrder()
             n = obj.getQName();
             if eliminate_unused
                 keep_dof_ = obj.getUsedPositionalStates();
@@ -535,7 +526,6 @@ classdef MultiBodySystem  < handle
                 eliminate_unused (1,1) logical = false
             end
             
-            obj.checkAuxODEFirstOrder()
             nd = obj.getQName();
             if eliminate_unused
                 keep_dof_ = obj.getUsedPositionalStates();
@@ -633,7 +623,7 @@ classdef MultiBodySystem  < handle
         function tf = isConstant(obj, expr, naming)
             arguments
                 obj
-                expr sym
+                expr
                 naming {mustBeTextScalar} = 'real_name'
             end
         
@@ -650,14 +640,14 @@ classdef MultiBodySystem  < handle
             tf = all(ismember(string(syms_in_expr), constants_list));
         end
 
-        function [partial_names, deps, dep_names] = getExternalDerivs(obj, i, naming)
+        function [partial_names, deps, dep_names] = getExternalDerivs(obj, i, ~)
             fn = fieldnames(obj.externals);
             n = fn{i};
             deps = obj.external_deps.(n);
             dep_names = obj.replaceDOFs(deps);
             partial_names = cell(1, length(deps));
-            for i = 1:length(deps)
-                partial_names{i} = ['d' n '_d' char(dep_names(i))];
+            for j = 1:length(deps)
+                partial_names{j} = ['d' n '_d' char(dep_names(j))];
             end
         end
 
@@ -670,13 +660,12 @@ classdef MultiBodySystem  < handle
             if ~isempty(obj.eom)
                 eom_ = obj.eom;
             else
-                eom_ = sym(zeros(length(obj.q), 1));
+                eom_ = obj.sym(zeros(length(obj.q), 1));
                 for i= 1:length(obj.attached_bodies)
                     eom_ = eom_ + obj.attached_bodies(i).collectGenForces;
                 end
     
-                eom_ = simplify(eom_, 'Steps', 50);
-                eom_ = collect(eom_, struct2array(obj.dof));
+                eom_ = obj.simplify(eom_);
                 obj.eom = eom_;
             end
             if with_aux
@@ -690,19 +679,17 @@ classdef MultiBodySystem  < handle
                 eliminate_unused (1,1) logical = false
             end
             
-            % For now, only first order auxilliary ODEs are permitted
-            obj.checkAuxODEFirstOrder()
-
             if eliminate_unused
                 keep_dof_ = obj.getUsedPositionalStates();
             else
                 keep_dof_ = true(length(obj.q), 1);
             end
 
+            dx1 = obj.sym([]);
             for i = 1:length(obj.q)
                 % positonal state derivatives
                 % these have to match with the names produced in getDStateNames
-                dx1(i, 1) = sym(sprintf('dot_%s', obj.getQName(i)), 'real');
+                dx1(i, 1) = obj.sym(sprintf('dot_%s', obj.getQName(i)));
             end
 
             eom_ = getEOM(obj);
@@ -710,7 +697,11 @@ classdef MultiBodySystem  < handle
             % TODO: check if some auxilliary ODEs are also intgrals
             i_state_idx = [true(sum(keep_dof_), 1); false(length(eom_) + length(obj.aux_impl_ode), 1)];
 
-            f_impl = [dx1(keep_dof_) - obj.getTimeDeriv(obj.q(keep_dof_), 1) ; eom_; obj.aux_impl_ode];
+            % work-aroud for inconsistent MAMaS concatenation rules: pre allocate correct dimensions
+            f_impl = obj.sym(zeros(sum(keep_dof_)+obj.getNumDOF+length(obj.aux_impl_ode), 1));
+            f_impl(1:sum(keep_dof_)) = dx1(keep_dof_) - obj.getTimeDeriv(obj.q(keep_dof_), 1);
+            f_impl((1:obj.getNumDOF)+sum(keep_dof_)) = eom_;
+            f_impl((1:length(obj.aux_impl_ode))+sum(keep_dof_)+obj.getNumDOF) = obj.aux_impl_ode;
         end
 
         function Fz_ = getConstraintForce(obj, name, remove_eps)
@@ -723,122 +714,49 @@ classdef MultiBodySystem  < handle
             if ~isempty(obj.eom)
                 Fz_ = obj.Fz;
             else
-                Fz_ = sym(zeros(length(obj.z), 1));
+                Fz_ = obj.sym(zeros(length(obj.z), 1));
                 for i= 1:length(obj.attached_bodies)
                     Fz_ = Fz_ + obj.attached_bodies(i).collectConstrForces;
                 end
                 
-                Fz_ = simplify(Fz_);
+                Fz_ = obj.simplify(Fz_);
                 obj.Fz = Fz_;
             end
 
             Fz_ = Fz_(ismember(fieldnames(obj.doc_idx), name));
             if remove_eps
-                Fz_ = Body.removeEps(Fz_);
-            end
-        end
-
-        function fun = eomFunO2(obj, filename)
-            eom_ = getEOM(obj);
-            [eom_, vars]= obj.replaceVars(eom_, 'numbered');
-            if ~exist('filename', 'var')
-                fun = matlabFunction(eom_, 'Vars', {vars.q_, vars.qd_, vars.qdd_, struct2array(obj.inputs), struct2array(obj.params.getParamSyms())});            
-            else
-                matlabFunction(eom_, 'File', filename, 'Vars', {vars.q_, vars.qd_, vars.qdd_, struct2array(obj.inputs), struct2array(obj.params.getParamSyms())});
-            end
-        end
-
-        function fun = eomFunDescriptor(obj, filename)
-            eom_ =  getEOM(obj);
-            [eom_, vars]= obj.replaceVars(eom_, 'numbered');
-            M_ = -getM(obj);
-            f_= simplify(eom_ + M_*vars.qdd);
-
-            if ~exist('filename', 'var')
-                fun = matlabFunction(M_, f_, 'Vars', {vars.q_, vars.qd_, struct2array(obj.inputs), struct2array(obj.params.getParamSyms())});            
-            else
-                matlabFunction(M_, f_, 'File', filename, 'Vars', {vars.q_, vars.qd_, struct2array(obj.inputs), struct2array(obj.params.getParamSyms())});
-            end
-        end
-
-        function fun = eomDae(obj, filename)
-            eom_ = getEOM(obj);
-            
-            if isempty(fieldnames(obj.inputs))
-                inputs_ = sym('dummy', 'real');
-            else
-                inputs_ = struct2array(obj.inputs);
-            end
-            % replace external functions by simple symbols because
-            % daeFunction doesn't work with symfuns
-            fn = fieldnames(obj.externals);
-            if isempty(fn)
-                externalSyms = sym('dummy', 'real');
-            else
-                externalSyms= sym.empty(1, 0);
-                for i = 1:length(fn)
-                    externalSyms(end+1) = sym(fn{i}, 'real');
-                end
-                eom_ = subs(eom_, struct2array(obj.externals), externalSyms);
-            end
-
-            for i = 1:length(obj.q)
-                save_assumptions = assumptions;
-                x1(i, 1) = symfun(str2sym(sprintf('x1_%d(time)', i)), obj.time);
-                x2(i, 1) = symfun(str2sym(sprintf('x2_%d(time)', i)), obj.time);
-                assumptions(save_assumptions); % str2sym deletes the original assumptions
-                assumeAlso(x1(i, 1), 'real')
-                assumeAlso(x2(i, 1), 'real')
-            end
-            x = [x1 ; x2; struct2array(obj.aux_state)];
-
-            eom_ = subs(eom_, diff(obj.q, obj.time, 2), diff(x2, obj.time));
-            eom_ = subs(eom_, diff(obj.q, obj.time), x2);
-            eom_ = subs(eom_, obj.q, x1);
-
-            f_impl = [diff(x1, obj.time) == x2 ; eom_; obj.aux_impl_ode];
-
-            if ~exist('filename', 'var')
-                fun = daeFunction(f_impl, x, inputs_, externalSyms, struct2array(obj.params.getParamSyms()));
-            else
-                daeFunction(f_impl, x, inputs_, externalSyms, struct2array(obj.params.getParamSyms()), 'File', filename);
+                Fz_ = obj.removeEps(Fz_);
             end
         end
 
         function [e, vars] = replaceDOFs(obj, e, naming)
             arguments
                 obj 
-                e (:,:) sym
+                e (:,:)
                 naming {mustBeText} = 'real_name'
             end
             % TODO: save assumptions here too?
-            vars.qdd = str2sym(obj.getQddName([], naming));
-            assume(vars.qdd, 'real')
-            vars.qd = str2sym(obj.getQdName([], naming));
-            assume(vars.qd, 'real')
-            vars.q = str2sym(obj.getQName([], naming));
-            assume(vars.q, 'real')
+            vars.qdd = cellfun(@(n)obj.sym(n), obj.getQddName([], naming));
+            vars.qd = cellfun(@(n)obj.sym(n), obj.getQdName([], naming));
+            vars.q = cellfun(@(n)obj.sym(n), obj.getQName([], naming));
 
             e = subs(e, diff(obj.q, obj.time, 2), vars.qdd);
             e = subs(e, diff(obj.q, obj.time), vars.qd);
             e = subs(e, obj.q, vars.q);
 
-            vars.aux = str2sym(obj.getAuxName([], 0, naming));
-            assume(vars.aux, 'real')
-            vars.auxd = str2sym(obj.getAuxName([], 1, naming));
-            assume(vars.aux, 'real')
-            vars.auxdd = str2sym(obj.getAuxName([], 2, naming));
-            assume(vars.aux, 'real')
-
-            e = subs(e, obj.getTimeDeriv(struct2array(obj.aux_state), 2), vars.auxdd);
+            vars.aux = cellfun(@(n)obj.sym(n), obj.getAuxName([], 0, naming));
+            vars.auxd = cellfun(@(n)obj.sym(n), obj.getAuxName([], 1, naming));
+            vars.auxdd = cellfun(@(n)obj.sym(n), obj.getAuxName([], 2, naming));
+            
+            % TODO: handle arbitrary order aux states
             e = subs(e, obj.getTimeDeriv(struct2array(obj.aux_state), 1), vars.auxd);
-            e = subs(e, struct2array(obj.aux_state)', vars.aux);
+            e = subs(e, struct2array(obj.aux_state).', vars.aux);
         end
 
         function [e, vars] = replaceVars(obj, e, naming)
             arguments
                 obj 
-                e (:,:) sym
+                e (:,:) 
                 naming {mustBeText} = 'real_name'
             end
             % external derivatives have to be replaced first to not get confused when
@@ -848,34 +766,26 @@ classdef MultiBodySystem  < handle
             ext_d = cell(size(exts));
             for i = 1:length(exts)
                 partial_names = obj.getExternalDerivs(i, naming);
-                % TODO: save assumptions here too?
-                partial_syms = str2sym(partial_names);
-                assume(partial_syms, 'real')
+                partial_syms = cellfun(@(n)obj.sym(n), partial_names);
                 deps = obj.external_deps.(ext_names{i});
                 for j = 1:length(deps)
-                    % partial_deriv = functionalDerivative(obj.externals(i), deps(j));
                     partial_deriv = diff(exts(i), deps(j));
                     e = subs(e, partial_deriv, partial_syms(j));            
                 end
                 ext_d{i} = partial_syms;
             end
-            ext_vars = str2sym(obj.getExternalName([], naming));
-            assume(ext_vars, 'real')
-            e = subs(e, exts, ext_vars');
+            ext_vars = cellfun(@(n)obj.sym(n), obj.getExternalName([], naming));
+            e = subs(e, exts, ext_vars.');
 
             [e, vars] = replaceDOFs(obj, e, naming);
             
             vars.ext = ext_vars;
             vars.ext_d = ext_d;
 
-            % TODO: save_assumptions here too?
-            vars.u = str2sym(obj.getInName([], naming));
-            assume(vars.u, 'real')
-            vars.p = str2sym(obj.getParamName([], naming));
-            assume(vars.p, 'real')
+            vars.u = cellfun(@(n)obj.sym(n), obj.getInName([], naming));
+            vars.p = cellfun(@(n)obj.sym(n), obj.getParamName([], naming));
 
-
-            e = subs(e, struct2array(obj.inputs), vars.u');
+            e = subs(e, struct2array(obj.inputs), vars.u.');
             e = subs(e, struct2array(obj.params.getParamSyms()), vars.p);
         end
 
@@ -894,8 +804,8 @@ classdef MultiBodySystem  < handle
         function J = getJacobian(obj, vars, cached, with_aux)
             arguments
                 obj 
-                vars (:, 1) sym
-                cached sym
+                vars (:, 1) 
+                cached 
                 with_aux (1,1) logical = false
             end
             obj.checkSetupCompleted()
@@ -1007,9 +917,9 @@ classdef MultiBodySystem  < handle
                 end
             else
                 if with_aux
-                    vars = [obj.q; struct2array(obj.aux_state); obj.getTimeDeriv(obj.q, 1); obj.getTimeDeriv(struct2array(obj.aux_state), 1); struct2array(obj.inputs)'];
+                    vars = [obj.q; struct2array(obj.aux_state); obj.getTimeDeriv(obj.q, 1); obj.getTimeDeriv(struct2array(obj.aux_state), 1); struct2array(obj.inputs).'];
                 else
-                    vars = [obj.q; obj.getTimeDeriv(obj.q, 1); struct2array(obj.inputs)'];
+                    vars = [obj.q; obj.getTimeDeriv(obj.q, 1); struct2array(obj.inputs).'];
                 end
                 CD_= jacobian(struct2array(obj.outputs), vars);
                 obj.CD = CD_;
@@ -1047,6 +957,55 @@ classdef MultiBodySystem  < handle
                 v(i) = p.(char(pv(i)));
             end
         end
+
+        function expr = removeEps(obj, expr, keep_symbols)
+            arguments
+                obj
+                expr
+                keep_symbols (1,1) logical = false
+            end
+            if obj.isMSym
+                % remove small rotations
+                expr = expr.subs(obj.sym_eps_rot^2, 0, true);
+                if ~keep_symbols
+                    expr = expr.subs(obj.sym_eps_rot, 1);
+                end
+
+                % remove cross terms of small elastic terms
+                expr = expr.subs(obj.sym_eps^2, 0, true);
+                if ~keep_symbols
+                    expr = expr.subs(obj.sym_eps, 1);
+                end
+            elseif obj.isSym
+                % remove small rotations
+                expr = obj.removeHigherOrderTermsSym(expr, obj.sym_eps_rot, keep_symbols);
+
+                % remove cross terms of small elastic terms
+                % TODO: add reference why only first order terms are kept
+                expr = obj.removeHigherOrderTermsSym(expr, obj.sym_eps, keep_symbols);
+            else
+                error('Unsupported symbolic backend: %s', obj.getSymbolicBackend)
+            end
+            % TODO: what about eps*eps_rot cross terms?
+        end
+
+        function expr = keepEps(obj, expr)
+            expr = subs(expr, [obj.sym_eps, obj.sym_eps_rot], [1, 1]);
+        end
+
+        function expr = removeDOC(obj, expr)
+            if obj.isMSym   
+                expr = subs(expr, struct2array(obj.doc), 0);
+            elseif obj.isSym
+                expr = subs(expr, obj.z, zeros(size(obj.z)));
+            else
+                error('Unsupported symbolic backend: %s', obj.getSymbolicBackend)
+            end
+            for i = 1:length(obj.z)
+                expr = subs(expr, obj.z(i), 0);
+            end
+        end
+
         function checkSetupCompleted(obj)
             if ~obj.setupCompleted
                 error('Model setup has not been completed. Please run completeSetup first.')
@@ -1067,6 +1026,28 @@ classdef MultiBodySystem  < handle
             for i= 1:length(obj.attached_bodies)
                 obj.attached_bodies(i).T0= obj.attached_bodies(i).T;
                 obj.attached_bodies(i).prepareKinematics;
+            end
+        end
+        
+        function [x, x_d, x_dd] = createDerivatives(obj, var_name)
+            var_name_d = [var_name '_d']; % This should be the sam as 'real_name' like in getQdName
+            var_name_dd = [var_name '_dd'];
+
+            obj.checkName(var_name);
+            obj.checkName(var_name_d);
+            obj.checkName(var_name_dd);
+            if obj.isMSym
+                x = obj.sym(var_name);
+                gradef(x, obj.time, var_name_d)
+                x_d  = obj.sym(var_name_d);
+                gradef(x_d, obj.time, var_name_dd)
+                x_dd = obj.sym(var_name_dd, obj.time);
+            elseif obj.isSym
+                x = str2sym([var_name '(' char(obj.time) ')']);
+                x_d = diff(x, obj.time);
+                x_dd = diff(x, obj.time, 2);
+            else
+                error('Unsupported symbolic backend: %s', obj.getSymbolicBackend)
             end
         end
 
@@ -1126,67 +1107,164 @@ classdef MultiBodySystem  < handle
         end
 
         function keep_dof_ = getUsedPositionalStates(obj)
-            if isempty(obj.keep_dof)
+            if isempty(obj.keep_positional_states)
                 eom_ = obj.getEOM();
-                % we need to remove the diff so as not to find the
-                % functions inside them
-                dummy = @(y) sym('dummy');
-                eom_ = mapSymType(eom_, 'diff', dummy);
                 outs= struct2array(obj.outputs);
-                if isempty(outs)
-                    time_funs = findSymType(eom_, 'symfun');
-                else
-                    outs = mapSymType(outs, 'diff', dummy);
-                    time_funs = [findSymType(eom_, 'symfun') findSymType(outs, 'symfun')];
-                end
 
                 keep_dof_ = true(length(obj.q), 1);
-                for i = 1:length(obj.q)
-                    if ~ismember(obj.q(i), time_funs)
-                        keep_dof_(i) = false;
+                if obj.isSym
+                    % we need to remove the diff so as not to find the
+                    % functions inside them
+                    dummy = @(y) sym('dummy');
+                    eom_ = mapSymType(eom_, 'diff', dummy);
+                    if isempty(outs)
+                        time_funs = findSymType(eom_, 'symfun');
+                    else
+                        outs = mapSymType(outs, 'diff', dummy);
+                        time_funs = [findSymType(eom_, 'symfun') findSymType(outs, 'symfun')];
                     end
-                end
-                obj.keep_dof = keep_dof_;
-            else
-                keep_dof_ = obj.keep_dof;
-            end
-        end
 
-        function checkAuxODEFirstOrder(obj)
-            obj.checkSetupCompleted()
-            if isempty(obj.aux_ode_first_order)
-                % get all derivatives in the aux ODEs
-                derivs_aux = findSymType(obj.aux_impl_ode, 'diff');
-                % for each check if it is of an aux state and if yes the order
-                for i = 1:length(derivs_aux)
-                    c = children(derivs_aux(i));
-                    % derivatimes should be only of individual time dependent
-                    % functions, these are then the first child of diff
-                    if ismember(c{1}, struct2array(obj.aux_state))
-                        % for now assume, all diffs are of time only, thus the
-                        % number of children determines the order
-                        if length(c)>2
-                            obj.aux_ode_first_order = false;
-                            error('One or more auxilliary ODEs is not of first order.')
+                    for i = 1:length(obj.q)
+                        if ~ismember(obj.q(i), time_funs)
+                            keep_dof_(i) = false;
                         end
                     end
+                elseif obj.isMSym
+                    for i = 1:length(obj.q)
+                        if ~eom_.contains(obj.q(i)) && (isempty(outs) || ~outs.contains(obj.q(i)))
+                            keep_dof_(i) = false;
+                        end
+                    end
+                else
+                    error('Unknown symbolic backend: %s', getSymbolicBackend());
                 end
-                obj.aux_ode_first_order = true;
+
+                obj.keep_positional_states = keep_dof_;
             else
-                if ~obj.aux_ode_first_order
-                    error('One or more auxilliary ODEs is not of first order.')
-                end
+                keep_dof_ = obj.keep_positional_states;
             end
         end
     end
 
-    methods (Static)
-        function s = sym(val)
-            s = sym(val);
+    methods
+        % ===== SYMBOLIC BACKEND ABSTRACTION METHODS =====
+        % These methods provide a unified interface to work with symbolic objects
+        % that work with both 'sym' (MATLAB Symbolic) and 'msym' (MAMaS/Maxima) backends.
+        
+        % Create a symbolic object based on the selected backend
+        function result = sym(obj, val, deps)
+            % sym(name, ...) or sym(value)
+            % Delegates to the appropriate backend (sym or msym)
+            if obj.isSym
+                if nargin<3 || isempty(deps)
+                    result = sym(val);
+                else
+                    result = str2sym(string(val) + "(" + join(string(deps), ',') + ")");
+                end
+            elseif obj.isMSym
+                if nargin<3 || isempty(deps)
+                    if val == pi
+                        result = msym.pi;
+                    else
+                        result = msym(val);
+                    end
+                else
+                    result = msym(val);
+                    result.depends(deps);
+                    % TODO: use gradef here too?
+                end
+            else
+                error('Unknown symbolic backend: %s', getSymbolicBackend());
+            end
+        end
+
+        function result = simplify(obj, expr)
+            if obj.isSym
+                result = simplify(expr, 'Steps', 50);
+                result = collect(result, struct2array(obj.dof));
+            elseif obj.isMSym
+                result = expr.simplify();
+            else
+                error('Unknown symbolic backend: %s', getSymbolicBackend());
+            end
+        end
+
+        function [opt, tnames, tvalues] = optimize(obj, varargin)
+            if obj.isSym
+                [tvalues, opt_, tnames] = feval2sym(symengine, 'symobj::optimizeWithIntermediates', [varargin{:}]);
+                opt_ = opt_(1);
+
+                col1 = 0;
+                opt = cell(1, length(varargin));
+                for i = 1:length(varargin)
+                    opt{i} = opt_(:, (1:size(varargin{i}, 2))+col1);
+                    col1 = col1 + size(varargin{i}, 2);
+                end
+            elseif obj.isMSym
+                for i = 1:length(varargin)
+                    if ~isscalar_matlab(varargin{i})
+                        varargin{i} = msym.matrix(varargin{i});
+                    end
+                end
+                [opt, tnames, tvalues] = optimize(cell2mat(varargin));
+                if isscalar(varargin)
+                    opt = {opt};
+                else
+                    opt = num2cell(opt);
+                end
+            else
+                error('Unknown symbolic backend: %s', getSymbolicBackend());
+            end
         end
     end
-    
+
+
+    methods (Static)
+        function b = getsetSymbolicBackend(b)
+            persistent symbolicBackend
+            if nargin<1 || isempty(b)
+                if isempty(symbolicBackend)
+                    symbolicBackend = 'sym';
+                end
+            else
+                symbolicBackend = b;
+            end
+            b = symbolicBackend;
+        end
+
+        function setSym()
+            MultiBodySystem.getsetSymbolicBackend('sym');
+        end
+        
+        function setMSym()
+            MultiBodySystem.getsetSymbolicBackend('msym');
+        end
+
+        function tf = isSym()
+            tf = strcmp(MultiBodySystem.getsetSymbolicBackend(), 'sym');
+        end
+
+        function tf = isMSym()
+            tf = strcmp(MultiBodySystem.getsetSymbolicBackend(), 'msym');
+        end
+    end
+
     methods (Static, Access = private)
+        function expr = removeHigherOrderTermsSym(expr, monom, keep_symbols)
+            for i = 1:length(expr)
+                c = coeffs(expr(i), monom, 'All');
+                switch length(c)
+                    case {0,1} % empty or no terms with monom, or only first order terms: keep them
+                    otherwise % remove all but first order terms
+                        if keep_symbols
+                            expr(i) = c(end-1)*monom + c(end);
+                        else
+                            expr(i) = sum(c(end-1:end)); % eliminate monom
+                        end
+                end
+            end
+        end
+
         function mustBeNonemptyCharOrCell(v)
             if ~(ischar(v) && ~isempty(v) || iscellstr(v) && ~isempty(v))
                 error('Input must be a nonempty char vector or nonempty cell array of char vectors.');

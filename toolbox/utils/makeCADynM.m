@@ -39,8 +39,8 @@ if ~skip_gen
     old_dir = pwd;
     cleanupObj = onCleanup(@()cd(old_dir));
     cd(model_dir);
-    modeFunc = str2func(model_file);
-    model = modeFunc(param);
+    modelFunc = str2func(model_file);
+    model = modelFunc(param);
     [~] = model.getEOM;
     model.removeUnusedParameters();
 
