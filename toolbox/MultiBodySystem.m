@@ -41,6 +41,7 @@ classdef MultiBodySystem  < handle
 
         sym_eps                                 % variable to control cross terms of small (elastic) deformations
         sym_eps_rot                             % variable to control cross terms of small (elastic) rotations
+        dummy
     end
 
     methods
@@ -53,8 +54,11 @@ classdef MultiBodySystem  < handle
             obj.time = obj.sym('time');
             obj.sym_eps = obj.sym('eps');
             obj.sym_eps_rot = obj.sym('eps_rot');
+            obj.dummy = obj.sym('dummy');  
+
             obj.q = obj.sym([]);
             obj.z = obj.sym([]);
+            obj.aux_impl_ode = obj.sym([]);
 
             % Pass system reference to Parameters so it can use the correct backend
             obj.params = Parameters([], obj);
@@ -334,8 +338,10 @@ classdef MultiBodySystem  < handle
                 var
                 order (1,1) double = 1
             end
-            if any(ismember(var, struct2array(obj.aux_state)))
-                if any(arrayfun(@(v)order>obj.aux_order.(v.identifier)), var)
+            aux_var_idx = ismember(struct2array(obj.aux_state), var);
+            if any(aux_var_idx)
+                aux_order_vec = struct2array(obj.aux_order);
+                if any(aux_order_vec(aux_order_vec)<order)
                     error('Requested derivative order exceeds defined order for this auxilliary state for (one of) "%s".', string(var))
                 end
             end
@@ -390,14 +396,16 @@ classdef MultiBodySystem  < handle
             n = length(fieldnames(obj.externals));
         end
 
-        function n = getQName(obj, i, naming)
+        function n = getQName(obj, i_, naming)
             arguments
                 obj 
-                i (1,:) double = 1:length(obj.q)
+                i_ (1,:) double = []
                 naming {mustBeText} = 'real_name'
             end
-            if isempty(i)
+            if isempty(i_)
                 i = 1:length(obj.q);
+            else
+                i = i_;
             end
             switch naming
                 case 'real_name'
@@ -408,19 +416,21 @@ classdef MultiBodySystem  < handle
                 case 'cpp'
                     n = sprintfc('q_IDX%dXDI_', i-1)';
             end
-            if nargin>1 && isscalar(i)
+            if nargin>1 && isscalar(i_)
                 n = n{1};
             end
         end
 
-        function n = getQdName(obj, i, naming)
+        function n = getQdName(obj, i_, naming)
             arguments
                 obj 
-                i (1,:) double = 1:length(obj.q)
+                i_ (1,:) double = []
                 naming {mustBeText} = 'real_name'
             end
-            if isempty(i)
+            if isempty(i_)
                 i = 1:length(obj.q);
+            else
+                i = i_;
             end
             switch naming
                 case 'real_name'
@@ -431,19 +441,21 @@ classdef MultiBodySystem  < handle
                 case 'cpp'
                     n = sprintfc('qd_IDX%dXDI_', i-1)';
             end
-            if isscalar(n)
+            if isscalar(n) && isscalar(i_)
                 n = n{1};
             end
         end
 
-        function n = getQddName(obj, i, naming)
+        function n = getQddName(obj, i_, naming)
             arguments
                 obj 
-                i (1,:) double = 1:length(obj.q)
+                i_ (1,:) double = 1:length(obj.q)
                 naming {mustBeText} = 'real_name'
             end
-            if isempty(i)
+            if isempty(i_)
                 i = 1:length(obj.q);
+            else
+                i = i_;
             end
             switch naming
                 case 'real_name'
@@ -454,25 +466,31 @@ classdef MultiBodySystem  < handle
                 case 'cpp'
                     n = sprintfc('qdd_IDX%dXDI_', i-1)';
             end
-            if isscalar(n)
+            if isscalar(n) && isscalar(i_)
                 n = n{1};
             end
         end
 
-        function n = getAuxName(obj, i, deriv, naming)
+        function n = getAuxName(obj, i_, deriv, naming)
             arguments
                 obj 
-                i (1,:) double = []
+                i_ (1,:) double = []
                 deriv (1,1) double = 0
                 naming {mustBeText} = 'real_name'
             end
-            if isempty(i)
+            if isempty(i_)
                 i = 1:obj.getNumAux();
+            else
+                i = i_;
             end
             if deriv>0
-                deriv_str = repmat('d', 1, deriv);
+                if deriv>2
+                    deriv_str = ['d' num2str(deriv)];
+                else
+                    deriv_str = repmat('d', 1, deriv);
+                end
             else
-                deriv_str = 0;
+                deriv_str = '';
             end
 
             switch naming
@@ -492,7 +510,7 @@ classdef MultiBodySystem  < handle
                 case 'cpp'
                     n = sprintfc(['q' deriv_str '_IDX%dXDI_'], i-1+obj.getNumDOF)';
             end
-            if isscalar(n)
+            if isscalar(n) && isscalar(i_)
                 n = n{1};
             end
         end
@@ -510,13 +528,7 @@ classdef MultiBodySystem  < handle
             end
             
             n_qd = obj.getQdName();
-            if ~iscell(n_qd)
-                n_qd = {n_qd};
-            end
             n_aux = obj.getAuxName();
-            if ~iscell(n_aux)
-                n_aux = {n_aux};
-            end
             n = [n; n_qd; n_aux];
         end
 
@@ -668,8 +680,12 @@ classdef MultiBodySystem  < handle
                 eom_ = obj.simplify(eom_);
                 obj.eom = eom_;
             end
-            if with_aux
-                eom_ = [eom_; obj.aux_impl_ode];
+            if with_aux && ~isempty(obj.aux_impl_ode)
+                % work-aroud for inconsistent MAMaS concatenation rules: pre allocate correct dimensions
+                eom__ = obj.sym(zeros(length(eom_)+length(obj.aux_impl_ode), 1));
+                eom__(1:length(eom_), 1) = eom_;
+                eom__(length(eom_)+1:end, 1) = obj.aux_impl_ode;
+                eom_ = eom__;
             end
         end
 
@@ -699,6 +715,7 @@ classdef MultiBodySystem  < handle
 
             % work-aroud for inconsistent MAMaS concatenation rules: pre allocate correct dimensions
             f_impl = obj.sym(zeros(sum(keep_dof_)+obj.getNumDOF+length(obj.aux_impl_ode), 1));
+
             f_impl(1:sum(keep_dof_)) = dx1(keep_dof_) - obj.getTimeDeriv(obj.q(keep_dof_), 1);
             f_impl((1:obj.getNumDOF)+sum(keep_dof_)) = eom_;
             f_impl((1:length(obj.aux_impl_ode))+sum(keep_dof_)+obj.getNumDOF) = obj.aux_impl_ode;
@@ -830,8 +847,20 @@ classdef MultiBodySystem  < handle
                 with_aux (1,1) logical = false
             end
             vars = obj.getTimeDeriv(obj.q, 2);
+            % currently only first order aux odes are allowed
             if with_aux
-                vars = [vars; obj.getTimeDeriv(struct2array(obj.aux_state), 2)];
+                aux_names = fieldnames(obj.aux_order);
+                aux_state_dd = cell(length(aux_names), 1);
+                for i = 1:length(aux_names)
+                    if obj.aux_order.(aux_names{i})<2
+                        % for second order integrators like Newmark Beta we
+                        % need to hanlde each ode like a second order ode
+                        aux_state_dd{i} = obj.dummy;
+                    elseif obj.aux_order.(aux_names{i})<3
+                        aux_state_dd{i} = obj.getTimeDeriv(obj.aux_state.(aux_names{i}), 2);
+                    end
+                end
+                vars = [vars; cell2mat(aux_state_dd)];
             end
 
             M_ = getJacobian(obj, vars, obj.M, with_aux);
@@ -942,7 +971,18 @@ classdef MultiBodySystem  < handle
             else
                 vars = obj.getTimeDeriv(obj.q, 2);
                 if with_aux
-                    vars = [vars; obj.getTimeDeriv(struct2array(obj.aux_state), 2)];
+                    aux_names = fieldnames(obj.aux_order);
+                    aux_state_dd = cell(length(aux_names), 1);
+                    for i = 1:length(aux_names)
+                        if obj.aux_order.(aux_names{i})<2
+                            % for second order integrators like Newmark Beta we
+                            % need to hanlde each ode like a second order ode
+                            aux_state_dd{i} = obj.dummy;
+                        elseif obj.aux_order.(aux_names{i})<3
+                            aux_state_dd{i} = obj.getTimeDeriv(obj.aux_state.(aux_names{i}), 2);
+                        end
+                    end
+                    vars = [vars; cell2mat(aux_state_dd)];
                 end
                 F_= jacobian(struct2array(obj.outputs), vars);
                 obj.F = F_;
@@ -984,7 +1024,7 @@ classdef MultiBodySystem  < handle
                 % TODO: add reference why only first order terms are kept
                 expr = obj.removeHigherOrderTermsSym(expr, obj.sym_eps, keep_symbols);
             else
-                error('Unsupported symbolic backend: %s', obj.getSymbolicBackend)
+                error('Unsupported symbolic backend: %s', obj.getsetSymbolicBackend)
             end
             % TODO: what about eps*eps_rot cross terms?
         end
@@ -999,7 +1039,7 @@ classdef MultiBodySystem  < handle
             elseif obj.isSym
                 expr = subs(expr, obj.z, zeros(size(obj.z)));
             else
-                error('Unsupported symbolic backend: %s', obj.getSymbolicBackend)
+                error('Unsupported symbolic backend: %s', obj.getsetSymbolicBackend)
             end
             for i = 1:length(obj.z)
                 expr = subs(expr, obj.z(i), 0);
@@ -1047,13 +1087,20 @@ classdef MultiBodySystem  < handle
                 x_d = diff(x, obj.time);
                 x_dd = diff(x, obj.time, 2);
             else
-                error('Unsupported symbolic backend: %s', obj.getSymbolicBackend)
+                error('Unsupported symbolic backend: %s', obj.getsetSymbolicBackend)
             end
         end
 
         function name_in_use= checkName(obj, name)
             if nargout>0
                 name_in_use= false;
+            end
+            if ismember(name, {'sym_eps', 'sym_eps_rot', 'dummy'})
+                if nargout>0
+                    name_in_use= true;
+                else
+                    error("The names sym_eps, sym_eps_rot and dummy are reserved for internal use.");
+                end                
             end
             if isfield(obj.bodies, name)
                 if nargout>0
@@ -1115,12 +1162,12 @@ classdef MultiBodySystem  < handle
                 if obj.isSym
                     % we need to remove the diff so as not to find the
                     % functions inside them
-                    dummy = @(y) sym('dummy');
-                    eom_ = mapSymType(eom_, 'diff', dummy);
+                    dummy_fun = @(y) obj.dummy;
+                    eom_ = mapSymType(eom_, 'diff', dummy_fun);
                     if isempty(outs)
                         time_funs = findSymType(eom_, 'symfun');
                     else
-                        outs = mapSymType(outs, 'diff', dummy);
+                        outs = mapSymType(outs, 'diff', dummy_fun);
                         time_funs = [findSymType(eom_, 'symfun') findSymType(outs, 'symfun')];
                     end
 

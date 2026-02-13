@@ -64,22 +64,44 @@ classdef ElasticTaylor  < handle
                 obj.structure = taylor_struct.structure;
                 obj.nelem = nelem;
 
+                if isempty(tol)
+                    rel_tol = 0;
+                    abs_tol = 0;
+                elseif isscalar(tol)
+                    rel_tol = tol;
+                    abs_tol = inf;
+                else
+                    rel_tol = tol(1);
+                    abs_tol = tol(2);
+                end
+                tol_ = min(abs_tol, norm(taylor_struct.M0(:))*abs(rel_tol));
+
                 switch obj.structure
                     case 0
-                        if ~all(taylor_struct.M0==0)
+                        if ~all(abs(taylor_struct.M0)>abs_tol)
                             error('Inconsistent structure 0 with non-zero M0 in ElasticTaylor initialization.')
+                        else
+                            taylor_struct.M0 = taylor_struct.M0*0;
                         end
                     case 1
-                        if any(diag(diag(taylor_struct.M0))~=taylor_struct.M0)
+                        M0_ref = diag(diag(taylor_struct.M0));
+                        if any(abs(taylor_struct.M0-M0_ref)>tol_)
                             error('Inconsistent structure 1 with non-diagonal M0 in ElasticTaylor initialization.')
+                        else
+                            taylor_struct.M0 = M0_ref;
                         end
                     case 2
-                        if any(taylor_struct.M0.' ~= taylor_struct.M0)
+                        if any(abs(taylor_struct.M0.' - taylor_struct.M0)>tol_)
                             error('Inconsistent structure 2 with non-symmetric M0 in ElasticTaylor initialization.')
+                        else
+                            taylor_struct.M0 = 0.5*(taylor_struct.M0 + taylor_struct.M0.');
                         end
                     case 4
-                        if ~isequal(eye(size(taylor_struct.M0)), taylor_struct.M0)
+                        M0_ref = eye(size(taylor_struct.M0));
+                        if any(abs(taylor_struct.M0.' - taylor_struct.M0)>tol_)
                             error('Inconsistent structure 4 with non-unit M0 in ElasticTaylor initialization.')
+                        else
+                            taylor_struct.M0 = M0_ref;
                         end
                 end
                 if nelem>0 && ~iscell(taylor_struct.M0)
@@ -181,7 +203,7 @@ classdef ElasticTaylor  < handle
 
     methods (Access = private)
         function M = setElements(obj, M_, order, tol, name, system)
-            if iscell(M_) || isa(M_, 'sym')
+            if iscell(M_) || isa(M_, 'sym') || isa(M_, 'msym')
                 % if M_ is already a cell array or symbolic, we assume it was already processed and just return it as M
                 M = M_;
                 return

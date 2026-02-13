@@ -1,4 +1,4 @@
-{{ fprintf("%% Multibody system: %s\n", temp_data.Name); }}
+{{ fprintf('%% Multibody system: "%s", generated using backend %s', temp_data.Name, temp_data.getsetSymbolicBackend); }}
 
 nq = {{ fprintf("%d", temp_data.getNumDOF+temp_data.getNumAux); }};
 nx = {{ fprintf("%d", 2*temp_data.getNumDOF+2*temp_data.getNumAux); }};

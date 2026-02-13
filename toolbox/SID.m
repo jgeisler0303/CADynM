@@ -77,7 +77,7 @@ classdef SID  < handle
                 obj.Cr = ElasticTaylor(sid_struct.Cr, 0, tol, [name '_Cr'], system);
                 
                 % Compute md.M1 from Ct to reuse parameter symbols 
-                M = obj.Ct.M0';
+                M = obj.Ct.M0.';
                 sid_struct.md.M1 = arrayfun(@(i)M(:, i), 1:size(M, 2), UniformOutput=false);
                 obj.md = ElasticTaylor(sid_struct.md, 0, tol, [name '_md'], system);
                 

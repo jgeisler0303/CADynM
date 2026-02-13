@@ -46,8 +46,17 @@ if ~skip_gen
 
     for i= 1:length(files_to_generate)
         [code_file, template_name]= get_target_name(model_name, files_to_generate{i});
-
-        matlabTemplateEngine(fullfile(target_path, code_file), template_name, model)        
+        
+        target_file = fullfile(target_path, code_file);
+        try
+            matlabTemplateEngine(target_file, template_name, model)
+        catch ME
+            if exist(target_file, 'file')
+                [p, n, e] = fileparts(target_file);
+                movefile(target_file, fullfile(p, [n '_error' e]))
+            end
+            rethrow(ME)
+        end
     end
 else
     fprintf('Skipping CADynM generation because model is already up to date or you wanted it so\n');

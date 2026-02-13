@@ -271,6 +271,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
         end
 
         % Rodrigues' formula for rotation matrix and wrap into 4x4
+        % TODO: move to MultiBodySystem
         function T = rotationMatrix(obj, axis, angle)
             if ischar(axis)
                 switch axis

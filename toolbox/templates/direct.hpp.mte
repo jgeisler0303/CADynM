@@ -1,4 +1,4 @@
-{{ fprintf("/* Multibody system: %s */", temp_data.Name); }}
+{{ fprintf('/* Multibody system: "%s", generated using backend %s */', temp_data.Name, temp_data.getsetSymbolicBackend); }}
 
 #include <string>
 #include <map>

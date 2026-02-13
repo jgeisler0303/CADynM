@@ -21,7 +21,7 @@ classdef ElasticBody  < Body
             if ~isempty(eDOF) && length(eDOF)~=obj.sid.nelastq
                 error('Number of elastic DOF (%d) and DOF in SID (%d) must match.', length(eDOF), sid.nelastq)
             end
-            obj.ElasticDOF = eDOF;
+            obj.ElasticDOF = eDOF(:);
 
             if nargin > 2
                 obj.Name = name;
