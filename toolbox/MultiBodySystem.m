@@ -29,12 +29,6 @@ classdef MultiBodySystem  < handle
 
         eom
         Fz                                      % cache for calculated constraint forces
-        M
-        C 
-        K 
-        B 
-        CD 
-        F
 
         keep_positional_states logical = []     % cache for positional states that are not unused
         aux_ode_first_order logical = []        % cache for test result, if all aux ODEs are first order
@@ -415,6 +409,13 @@ classdef MultiBodySystem  < handle
                     n = sprintfc('q_%d', i)';
                 case 'cpp'
                     n = sprintfc('q_IDX%dXDI_', i-1)';
+                case 'cpp_ode1'
+                    % we must assume the state vector is composed like
+                    % [q(keep_positional_states), qd, aux]
+                    keep_q = obj.getUsedPositionalStates();
+                    keep_q_idx = cumsum(keep_q)-1;
+                    keep_q_idx(~keep_q) = nan;
+                    n = sprintfc('x_IDX%dXDI_', keep_q_idx(i));
             end
             if nargin>1 && isscalar(i_)
                 n = n{1};
@@ -440,6 +441,10 @@ classdef MultiBodySystem  < handle
                     n = sprintfc('qd_%d', i)';
                 case 'cpp'
                     n = sprintfc('qd_IDX%dXDI_', i-1)';
+                case 'cpp_ode1'
+                    % we must assume the state vector is composed like
+                    % [q(keep_positional_states), qd, aux]
+                    n = sprintfc('x_IDX%dXDI_', i-1+sum(obj.getUsedPositionalStates()))';
             end
             if isscalar(n) && isscalar(i_)
                 n = n{1};
@@ -465,6 +470,8 @@ classdef MultiBodySystem  < handle
                     n = sprintfc('qdd_%d', i)';
                 case 'cpp'
                     n = sprintfc('qdd_IDX%dXDI_', i-1)';
+                case 'cpp_ode1'
+                    n = sprintfc('xdot_IDX%dXDI_', i-1)';
             end
             if isscalar(n) && isscalar(i_)
                 n = n{1};
@@ -509,6 +516,16 @@ classdef MultiBodySystem  < handle
                     n = sprintfc('%s_%d', basename, i)';
                 case 'cpp'
                     n = sprintfc(['q' deriv_str '_IDX%dXDI_'], i-1+obj.getNumDOF)';
+                case 'cpp_ode1'
+                    % we must assume the state vector is composed like
+                    % [q(keep_positional_states), qd, aux]
+                    if deriv==0
+                        n = sprintfc('x_IDX%dXDI_', i-1+sum(obj.getUsedPositionalStates())+length(obj.q))';
+                    elseif deriv==1
+                        n = sprintfc('xdot_IDX%dXDI_', i-1+length(obj.q))';
+                    else
+                        n = sprintfc('xdot_IDX%dXDI_', i-1+nan)';
+                    end
             end
             if isscalar(n) && isscalar(i_)
                 n = n{1};
@@ -571,7 +588,7 @@ classdef MultiBodySystem  < handle
                     n = fn(i);
                 case 'numbered'
                     n = sprintfc('in_%d', i)';
-                case 'cpp'
+                case {'cpp', 'cpp_ode1'}
                     n = sprintfc('u_IDX%dXDI_', i-1)';
             end
             if isscalar(n)
@@ -599,7 +616,7 @@ classdef MultiBodySystem  < handle
                     n = fn(i)';
                 case 'numbered'
                     n = sprintfc('p_%d', i)';
-                case 'cpp'
+                case {'cpp', 'cpp_ode1'}
                     fn = obj.params.getParamNames();
                     n = strcat('PSTRUCT_', fn(i))';
             end
@@ -623,7 +640,7 @@ classdef MultiBodySystem  < handle
                     n = fn(i);
                 case 'numbered'
                     n = sprintfc('ext_%d', i)';
-                case 'cpp'
+                case {'cpp', 'cpp_ode1'}
                     fn = fieldnames(obj.externals);
                     n = fn(i);
             end
@@ -632,14 +649,17 @@ classdef MultiBodySystem  < handle
             end
         end
 
-        function tf = isConstant(obj, expr, naming)
+        function [tf, constants_list] = isConstant(obj, expr, naming, constants_list)
             arguments
                 obj
                 expr
                 naming {mustBeTextScalar} = 'real_name'
+                constants_list = [] % allow to reuse constants_list, naming will be ignored in that case
             end
         
-            constants_list = string(obj.getParamName([], naming));
+            if isempty(constants_list)
+                constants_list = string(obj.getParamName([], naming));
+            end
             syms_in_expr = symvar(expr);
         
             % If no symbolic variables, it is constant
@@ -689,7 +709,46 @@ classdef MultiBodySystem  < handle
             end
         end
 
-        function [f_impl, i_state_idx] = getImplStateSpaceODE(obj, eliminate_unused)
+        function keep_dof_ = getUsedPositionalStates(obj)
+            if isempty(obj.keep_positional_states)
+                eom_ = obj.getEOM();
+                outs= struct2array(obj.outputs);
+
+                keep_dof_ = true(length(obj.q), 1);
+                if obj.isSym
+                    % we need to remove the diff so as not to find the
+                    % functions inside them
+                    dummy_fun = @(y) obj.dummy;
+                    eom_ = mapSymType(eom_, 'diff', dummy_fun);
+                    if isempty(outs)
+                        time_funs = findSymType(eom_, 'symfun');
+                    else
+                        outs = mapSymType(outs, 'diff', dummy_fun);
+                        time_funs = [findSymType(eom_, 'symfun') findSymType(outs, 'symfun')];
+                    end
+
+                    for i = 1:length(obj.q)
+                        if ~ismember(obj.q(i), time_funs)
+                            keep_dof_(i) = false;
+                        end
+                    end
+                elseif obj.isMSym
+                    for i = 1:length(obj.q)
+                        if ~eom_.contains(obj.q(i)) && (isempty(outs) || ~outs.contains(obj.q(i)))
+                            keep_dof_(i) = false;
+                        end
+                    end
+                else
+                    error('Unknown symbolic backend: %s', getSymbolicBackend());
+                end
+
+                obj.keep_positional_states = keep_dof_;
+            else
+                keep_dof_ = obj.keep_positional_states;
+            end
+        end
+
+        function [f_impl, i_state_idx] = getDAEForm(obj, eliminate_unused)
             arguments
                 obj 
                 eliminate_unused (1,1) logical = false
@@ -818,159 +877,32 @@ classdef MultiBodySystem  < handle
             end
         end
 
-        function J = getJacobian(obj, vars, cached, with_aux)
+        function J = getJacobian(obj, vars, with_aux)
             arguments
                 obj 
                 vars (:, 1) 
-                cached 
                 with_aux (1,1) logical = false
             end
             obj.checkSetupCompleted()
-            n_states = obj.getNumDOF;
-            if with_aux
-                n_states = n_states + obj.getNumAux;
-            end
-            if size(cached, 1)>=n_states
-                J = cached(1:n_states, 1:n_states);
-            else
-                eom_ = obj.getEOM(with_aux);
 
-                J= jacobian(eom_, vars);
-            end
+            eom_ = obj.getEOM(with_aux);
+            J= jacobian(eom_, vars);
         end
         % TODO: refactor to use one common jacobian function called with
         % different derivative vectors
         % Generalized mass matrix
-        function M_ = getM(obj, with_aux)
+        function M = getM(obj, with_aux, aux_ode1)
             arguments
                 obj 
                 with_aux (1,1) logical = false
+                aux_ode1 (1,1) logical = false % if true, aux odes are treated as second order for use in Newmark Beta, otherwise they are treated as first (or later higher order) for use in condensed RK1
             end
             vars = obj.getTimeDeriv(obj.q, 2);
             % currently only first order aux odes are allowed
             if with_aux
-                aux_names = fieldnames(obj.aux_order);
-                aux_state_dd = cell(length(aux_names), 1);
-                for i = 1:length(aux_names)
-                    if obj.aux_order.(aux_names{i})<2
-                        % for second order integrators like Newmark Beta we
-                        % need to hanlde each ode like a second order ode
-                        aux_state_dd{i} = obj.dummy;
-                    elseif obj.aux_order.(aux_names{i})<3
-                        aux_state_dd{i} = obj.getTimeDeriv(obj.aux_state.(aux_names{i}), 2);
-                    end
-                end
-                vars = [vars; cell2mat(aux_state_dd)];
-            end
-
-            M_ = getJacobian(obj, vars, obj.M, with_aux);
-            obj.M = M_;
-        end
-
-        % Generalized coriolis and damping matrix
-        function C_ = getC(obj, with_aux)
-            arguments
-                obj 
-                with_aux (1,1) logical = false
-            end
-            vars = obj.getTimeDeriv(obj.q, 1);
-            if with_aux
-                vars = [vars; obj.getTimeDeriv(struct2array(obj.aux_state), 1)];
-            end
-
-            C_ = getJacobian(obj, vars, obj.C, with_aux);
-            obj.C = C_;
-        end
-
-        % Generalized stiffness matrix
-        function K_ = getK(obj,  with_aux)
-            arguments
-                obj 
-                with_aux (1,1) logical = false
-            end
-            vars = obj.q;
-            if with_aux
-                vars = [vars; struct2array(obj.aux_state)];
-            end
-
-            K_ = getJacobian(obj, vars, obj.K, with_aux);
-            obj.K = K_;
-        end
-
-        % Input Jacobian
-        function B_ = getB(obj, with_aux)
-            arguments
-                obj 
-                with_aux (1,1) logical = false
-            end
-            obj.checkSetupCompleted()
-            n_eqns = obj.getNumDOF;
-            if with_aux
-                n_eqns = n_eqns + obj.getNumAux;
-            end
-            if isempty(fieldnames(obj.inputs)) || size(obj.B, 1)>=n_eqns
-                B_ = obj.B(1:n_eqns, :);
-            else
-                vars = struct2array(obj.inputs);
-                B_= jacobian(obj.getEOM(with_aux), vars);
-                obj.B = B_;
-            end
-        end
-
-        % Output Jacobian
-        function CD_ = getCD(obj, with_aux)
-            arguments
-                obj 
-                with_aux (1,1) logical = false
-            end
-            obj.checkSetupCompleted()
-
-            n_derivs = 2*obj.getNumDOF + obj.getNumIn;
-            if with_aux
-                n_derivs = n_derivs + 2*obj.getNumAux;
-            end
-            % CD may hold the jacobian with or without auxilliaries
-            % if it was prior computed without, it has to be recomputed
-            if isempty(fieldnames(obj.outputs)) || size(obj.CD, 2)>=n_derivs
-                if isempty(fieldnames(obj.outputs)) || size(obj.CD, 2)==n_derivs
-                    % it was last computed with auxilliaries and is
-                    % demanded again or it was computed without and is
-                    % demanded as such: no problem
-                    CD_ = obj.CD;
+                if aux_ode1
+                    vars = [vars; obj.getTimeDeriv(struct2array(obj.aux_state), 1)];
                 else
-                    % it was last computed with and is no demanded without
-                    % auxilliaries
-                    idx = [true(1, obj.getNumDOF) false(1, obj.getNumAux)];
-                    idx = [idx idx true(1, obj.getNumIn)];
-                    CD_ = obj.CD(:, idx);
-                end
-            else
-                if with_aux
-                    vars = [obj.q; struct2array(obj.aux_state); obj.getTimeDeriv(obj.q, 1); obj.getTimeDeriv(struct2array(obj.aux_state), 1); struct2array(obj.inputs).'];
-                else
-                    vars = [obj.q; obj.getTimeDeriv(obj.q, 1); struct2array(obj.inputs).'];
-                end
-                CD_= jacobian(struct2array(obj.outputs), vars);
-                obj.CD = CD_;
-            end
-        end
-
-        % Output Jacobian wrt accelerations
-        function F_ = getF(obj, with_aux)
-            arguments
-                obj 
-                with_aux (1,1) logical = false
-            end
-            obj.checkSetupCompleted()
-            n_derivs = obj.getNumDOF;
-            if with_aux
-                n_derivs = n_derivs + obj.getNumAux;
-            end
-            if isempty(fieldnames(obj.outputs)) || size(obj.F, 2)>=n_derivs
-                F_ = obj.F(:, 1:n_derivs);
-            else
-                vars = obj.getTimeDeriv(obj.q, 2);
-                if with_aux
                     aux_names = fieldnames(obj.aux_order);
                     aux_state_dd = cell(length(aux_names), 1);
                     for i = 1:length(aux_names)
@@ -984,9 +916,123 @@ classdef MultiBodySystem  < handle
                     end
                     vars = [vars; cell2mat(aux_state_dd)];
                 end
-                F_= jacobian(struct2array(obj.outputs), vars);
-                obj.F = F_;
             end
+
+            M = getJacobian(obj, vars, with_aux);
+        end
+
+        % Generalized coriolis and damping matrix
+        function C = getC(obj, with_aux, aux_ode1)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
+                aux_ode1 (1,1) logical = false % if true, aux odes are treated as second order for use in Newmark Beta, otherwise they are treated as first (or later higher order) for use in condensed RK1
+            end
+            vars = obj.getTimeDeriv(obj.q, 1);
+            if with_aux
+                if aux_ode1
+                    vars = [vars; struct2array(obj.aux_state).'];
+                else
+                    vars = [vars; obj.getTimeDeriv(struct2array(obj.aux_state), 1)];
+                end
+            end
+
+            C = getJacobian(obj, vars, with_aux);
+        end
+
+        % Generalized stiffness matrix
+        function K = getK(obj,  with_aux, aux_ode1, eliminate_unused)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
+                aux_ode1 (1,1) logical = false % if true, aux odes are treated as second order for use in Newmark Beta, otherwise they are treated as first (or later higher order) for use in condensed RK1
+                eliminate_unused (1,1) logical = false
+            end
+
+            if eliminate_unused
+                keep_dof_ = obj.getUsedPositionalStates();
+                vars = obj.q(keep_dof_);
+            else
+                vars = obj.q;
+            end
+            
+            if with_aux && ~aux_ode1
+                vars = [vars; struct2array(obj.aux_state)];
+            end
+
+            K = getJacobian(obj, vars, with_aux);
+        end
+
+        % Input Jacobian
+        function B = getB(obj, with_aux)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
+            end
+            obj.checkSetupCompleted()
+
+            vars = struct2array(obj.inputs);
+            B= jacobian(obj.getEOM(with_aux), vars);
+        end
+
+        % Output Jacobian
+        function CD = getCD(obj, with_aux, aux_ode1, eliminate_unused)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
+                aux_ode1 (1,1) logical = false % if true, aux odes are treated as second order for use in Newmark Beta, otherwise they are treated as first (or later higher order) for use in condensed RK1
+                eliminate_unused (1,1) logical = false
+            end
+
+            obj.checkSetupCompleted()
+
+            if eliminate_unused
+                keep_dof_ = obj.getUsedPositionalStates();
+            else
+                keep_dof_ = true(length(obj.q), 1);
+            end
+            
+            if with_aux
+                if aux_ode1
+                    vars = [obj.q(keep_dof_); obj.getTimeDeriv(obj.q, 1); struct2array(obj.aux_state).'; struct2array(obj.inputs).'];
+                else
+                    vars = [obj.q(keep_dof_); struct2array(obj.aux_state); obj.getTimeDeriv(obj.q, 1); obj.getTimeDeriv(struct2array(obj.aux_state), 1); struct2array(obj.inputs).'];
+                end
+            else
+                vars = [obj.q(keep_dof_); obj.getTimeDeriv(obj.q, 1); struct2array(obj.inputs).'];
+            end
+            CD= jacobian(struct2array(obj.outputs), vars);
+        end
+
+        % Output Jacobian wrt accelerations
+        function F = getF(obj, with_aux, aux_ode1)
+            arguments
+                obj 
+                with_aux (1,1) logical = false
+                aux_ode1 (1,1) logical = false % if true, aux odes are treated as second order for use in Newmark Beta, otherwise they are treated as first (or later higher order) for use in condensed RK1
+            end
+            obj.checkSetupCompleted()
+
+            vars = obj.getTimeDeriv(obj.q, 2);
+            if with_aux
+                if aux_ode1
+                    vars = [vars; obj.getTimeDeriv(struct2array(obj.aux_state), 1)];                    
+                else
+                    aux_names = fieldnames(obj.aux_order);
+                    aux_state_dd = cell(length(aux_names), 1);
+                    for i = 1:length(aux_names)
+                        if obj.aux_order.(aux_names{i})<2
+                            % for second order integrators like Newmark Beta we
+                            % need to hanlde each ode like a second order ode
+                            aux_state_dd{i} = obj.dummy;
+                        elseif obj.aux_order.(aux_names{i})<3
+                            aux_state_dd{i} = obj.getTimeDeriv(obj.aux_state.(aux_names{i}), 2);
+                        end
+                    end
+                    vars = [vars; cell2mat(aux_state_dd)];
+                end
+            end
+            F = jacobian(struct2array(obj.outputs), vars);
         end
 
         function v = paramVec(obj, p)
@@ -1150,45 +1196,6 @@ classdef MultiBodySystem  < handle
                 else
                     error("Auxilliary state name '%s' already exists in the system.", name);
                 end
-            end
-        end
-
-        function keep_dof_ = getUsedPositionalStates(obj)
-            if isempty(obj.keep_positional_states)
-                eom_ = obj.getEOM();
-                outs= struct2array(obj.outputs);
-
-                keep_dof_ = true(length(obj.q), 1);
-                if obj.isSym
-                    % we need to remove the diff so as not to find the
-                    % functions inside them
-                    dummy_fun = @(y) obj.dummy;
-                    eom_ = mapSymType(eom_, 'diff', dummy_fun);
-                    if isempty(outs)
-                        time_funs = findSymType(eom_, 'symfun');
-                    else
-                        outs = mapSymType(outs, 'diff', dummy_fun);
-                        time_funs = [findSymType(eom_, 'symfun') findSymType(outs, 'symfun')];
-                    end
-
-                    for i = 1:length(obj.q)
-                        if ~ismember(obj.q(i), time_funs)
-                            keep_dof_(i) = false;
-                        end
-                    end
-                elseif obj.isMSym
-                    for i = 1:length(obj.q)
-                        if ~eom_.contains(obj.q(i)) && (isempty(outs) || ~outs.contains(obj.q(i)))
-                            keep_dof_(i) = false;
-                        end
-                    end
-                else
-                    error('Unknown symbolic backend: %s', getSymbolicBackend());
-                end
-
-                obj.keep_positional_states = keep_dof_;
-            else
-                keep_dof_ = obj.keep_positional_states;
             end
         end
     end

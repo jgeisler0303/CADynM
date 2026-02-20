@@ -65,7 +65,8 @@ function matlabTemplateEngine(out_file_name, template_name, temp_data)
     % Process template by iterating through literal segments + code segments
     %----------------------------------------------------------------------
     currentPos = 1;
-
+    
+    temp_persistent = [];
     for k = 1:numel(tokens)
         % Write literal text before this code block
         literalSegment = template(currentPos : tokenStarts(k)-1);
@@ -75,7 +76,7 @@ function matlabTemplateEngine(out_file_name, template_name, temp_data)
         code = strtrim(tokens{k}{1});
 
         % Execute code in a function workspace with temp_data unpacked
-        outStr = executeCodeBlock(code, temp_data);
+        [outStr, temp_persistent] = executeCodeBlock(code, temp_data, temp_persistent);
 
         % Write the captured output
         fwrite(fid_out, outStr);
@@ -94,12 +95,12 @@ end
 % =========================================================================
 % Helper: Execute MATLAB code block with temp_data unpacked
 % =========================================================================
-function outStr = executeCodeBlock(code, temp_data)
+function [outStr, temp_persistent] = executeCodeBlock(code, temp_data, temp_persistent)
     % Import values from struct into workspace of this function
     if isstruct(temp_data)
         fn = fieldnames(temp_data);
         for i = 1:numel(fn)
-            assignin('caller', fn{i}, temp_data.(fn{i}));
+            eval(sprintf('%s=temp_data.(fn{i});', fn{i}));
         end
     end
 

@@ -1,0 +1,45 @@
+{{ fprintf('%% Multibody system: "%s", generated using backend %s', temp_data.Name, temp_data.getsetSymbolicBackend); }}
+
+nx = {{ fprintf("%d", temp_data.getNumStates(true)); }};
+nxdot = {{ fprintf("%d", temp_data.getNumDOF + temp_data.getNumAux()); }};
+nu = {{ fprintf("%d", temp_data.getNumIn); }};
+ny = {{ fprintf("%d", temp_data.getNumOut); }};
+
+{{
+states = temp_data.getStateNames(true);
+for i = 1:length(states)
+    fprintf("%s_idx= %d;\n", states{i}, i);
+end
+}}
+{{ 
+for i = 1:temp_data.getNumIn
+    fprintf("in_%s_idx= %d;\n", temp_data.getInName(i), i);
+end
+}}
+{{ 
+for i = 1:temp_data.getNumOut
+    fprintf("out_%s_idx= %d;\n", temp_data.getOutName(i), i);
+end
+}}
+
+state_names= {
+{{ 
+states = temp_data.getStateNames(true);
+for i = 1:length(states)
+    fprintf("    '%s'\n", states{i});
+end
+}}};
+
+input_names= {
+{{ 
+for i = 1:temp_data.getNumIn
+    fprintf("    '%s'\n", temp_data.getInName(i));
+end
+}}};
+
+output_names= {
+{{ 
+for i = 1:temp_data.getNumOut
+    fprintf("    '%s'\n", temp_data.getOutName(i));
+end
+}}};

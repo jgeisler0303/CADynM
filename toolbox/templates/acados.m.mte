@@ -67,7 +67,7 @@ makeCasADiNamedVector('externals', externalNames, [], 1, 0);
 
 % implicit second order model
 {{
-    f_impl = temp_data.replaceVars(temp_data.getImplStateSpaceODE(true));
+    f_impl = temp_data.replaceVars(temp_data.getDAEForm(true));
 
     [opt, tnames, tvalues] = temp_data.optimize(f_impl);
     for i = 1:length(tnames)

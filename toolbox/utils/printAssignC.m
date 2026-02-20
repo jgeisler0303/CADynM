@@ -4,7 +4,7 @@ arguments
     name {mustBeTextScalar}
     var 
     type {mustBeTextScalar}
-    selector function_handle = @(x) true
+    selector = @(x) true
 end
 
 [m, n] = size(var);
@@ -14,10 +14,15 @@ else
     ind= indent;
 end
 
+if isa(selector, 'function_handle')
+    selector_internal = @(i, j) selector(var(i, j));
+else
+    selector_internal = @(i, j) selector(i, j);
+end
 ij= 0;
 for i = 1:m
     for j = 1:n
-        if ~selector(var(i, j)), continue, end
+        if ~selector_internal(i, j), continue, end
         switch type
             case 'numbered'
                 index = sprintf('%d', i+(j-1)*m);

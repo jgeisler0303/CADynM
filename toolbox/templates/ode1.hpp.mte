@@ -1,0 +1,412 @@
+{{ fprintf('/* Multibody system: "%s", generated using backend %s */', temp_data.Name, temp_data.getsetSymbolicBackend); }}
+
+#ifndef {{ fprintf('%s', upper([temp_data.Name '_ODE1_HPP'])); }}
+#define {{ fprintf('%s', upper([temp_data.Name '_ODE1_HPP'])); }}
+
+#include <string>
+#include <array>
+#include <cmath>
+#include <Eigen/Dense>
+
+typedef double real_type;
+
+#include "{{ fprintf('%s_param.hpp', temp_data.Name); }}"
+
+class {{ fprintf('%s', temp_data.Name); }} {
+public:
+    // Condensed system dimensions
+    {{ fprintf('static constexpr int dimI = %d;   // number of states that will be condensed out', sum(temp_data.getUsedPositionalStates())); }}
+    {{ fprintf('static constexpr int dimII = %d;  // number of states that will be kept', temp_data.getNumDOF() + temp_data.getNumAux()); }}
+    static constexpr int dimX = dimI + dimII; // number of states
+    {{ fprintf('static constexpr int dimIn = %d;  // number of inputs', temp_data.getNumIn()); }}
+    {{ fprintf('static constexpr int dimOut = %d; // number of outputs', temp_data.getNumOut()); }}
+
+    typedef double real_type;
+    typedef Eigen::Matrix<real_type, dimI+dimII, 1> VecX;
+    typedef Eigen::Matrix<real_type, dimI+dimII, dimI+dimII> MatX;
+    typedef Eigen::Matrix<real_type, dimI, 1> VecI;
+    typedef Eigen::Matrix<real_type, dimII, 1> VecII;
+    typedef Eigen::Matrix<real_type, dimI, dimI> MatI;
+    typedef Eigen::Matrix<real_type, dimI, dimII> MatI_II;
+    typedef Eigen::Matrix<real_type, dimII, dimI> MatII_I;
+    typedef Eigen::Matrix<real_type, dimII, dimII> MatII;
+    typedef Eigen::Matrix<real_type, dimIn, 1> VecIn;
+    typedef Eigen::Matrix<real_type, dimI+dimII, dimIn> MatIn;
+    typedef Eigen::Matrix<real_type, dimII, dimIn> MatII_In;
+    typedef Eigen::Matrix<real_type, dimOut, 1> VecOut;
+    typedef Eigen::Matrix<real_type, dimOut, dimI+dimII> MatOutX;
+    typedef Eigen::Matrix<real_type, dimOut, dimII> MatOutII;
+    typedef Eigen::Matrix<real_type, dimOut, dimIn> MatOutIn;
+
+    {{ fprintf('%s', temp_data.Name); }}();
+
+    // Residual evaluation: f(x, xdot, u, t) = 0, writes f
+    void evaluateResidual();
+
+    // Jacobian blocks for residual: df/dx, df/dxdot, write f, df_dx, df_dxdot
+    void evaluateResidualAndJacobians();
+
+    // Input Jacobian, writes df_du
+    void evaluateInputJacobian();
+
+    // Output evaluation, writes y
+    void evaluateOutput();
+
+    // Output and its Jacobian, writes y,  dy_dx, dy_dxdot, dy_du
+    void evaluateOutputJacobian();
+
+    void precalcConsts();
+    
+{{ 
+if temp_data.getNumExternals() > 0
+    fprintf('    void calculateExternal();\n');
+    fprintf('    void calculateExternalWithDeriv();\n\n');
+end
+}}
+    {{ fprintf('%sParameters param;', temp_data.Name); }}
+    
+    std::string name;
+    std::string description;
+
+    std::array<std::string, dimIn> in_name;
+    std::array<std::string, dimOut> out_name;
+    std::array<std::string, dimX> state_name;
+    
+{{
+% Input index by name
+fprintf('    typedef struct {\n');
+for i = 1:temp_data.getNumIn()
+    fprintf('        int %s;\n', temp_data.getInName(i));
+end
+fprintf('    } inputs_idx_type;\n\n');
+
+% Output index by name
+fprintf('    typedef struct {\n');
+for i = 1:temp_data.getNumOut()
+    fprintf('        int %s;\n', temp_data.getOutName(i));
+end
+fprintf('    } outputs_idx_type;\n\n');
+
+% State index by name
+states = temp_data.getStateNames(true);
+fprintf('    typedef struct {\n');
+for i = 1:length(states)
+    fprintf('        int %s;\n', states{i});
+end
+fprintf('    } states_idx_type;\n');    
+}}
+    static const states_idx_type states_idx;
+    static const inputs_idx_type inputs_idx;
+    static const outputs_idx_type outputs_idx;
+    
+    // Inputs and results
+    real_type t = 0.0;  // current time
+    VecX x;             // state at evaluation time
+    VecII xdot;      // state derivative at evaluation time
+    VecIn u;
+
+{{
+% Externally provided methods (included at the end) and their storage variables
+for i = 1:temp_data.getNumExternals()
+    fprintf('    real_type %s;\n', temp_data.getExternalName(i));
+end
+for i = 1:temp_data.getNumExternals()
+    d = temp_data.getExternalDerivs(i);
+    for j = 1:length(d)
+        fprintf('    real_type %s;\n', d{j});
+    end
+end
+}}
+    // Residual and Jacobian storage
+    VecII f_II;
+    MatI_II E;
+    MatII_I df_II_dx_I;
+    MatII df_II_dx_II;
+    MatII df_II_dxdot_II;
+    MatII_In df_II_du;
+
+    // Output storage
+    VecOut y;
+    MatOutX dy_dx;
+    MatOutII dy_dxdot;
+    MatOutIn dy_du;
+    
+{{ 
+% Inputs by name struct
+fprintf('    struct inputs_t {\n');
+fprintf('    public:\n');
+fprintf('        inputs_t(VecIn& u) : ');
+for i = 1:temp_data.getNumIn()
+    fprintf('%s(u.data()[%d])', temp_data.getInName(i), i-1);
+    if i ~= temp_data.getNumIn()
+        fprintf(', ');
+    end
+end
+fprintf(' {}\n\n');
+for i = 1:temp_data.getNumIn()
+    fprintf('        real_type  &%s;\n', temp_data.getInName(i));
+end
+fprintf('    } inputs;\n');
+}}
+{{
+% Outputs by name struct
+fprintf('    struct outputs_t {\n');
+fprintf('    public:\n');
+fprintf('        outputs_t(VecOut& y) : ');
+for i = 1:temp_data.getNumOut()
+    fprintf('%s(y.data()[%d])', temp_data.getOutName(i), i-1);
+    if i ~= temp_data.getNumOut()
+        fprintf(', ');
+    end
+end
+fprintf(' {}\n\n');
+for i = 1:temp_data.getNumOut()
+    fprintf('        real_type  &%s;\n', temp_data.getOutName(i));
+end
+fprintf('    } outputs;\n');
+}}
+{{
+% States by name struct
+fprintf('    struct states_t {\n');
+fprintf('    public:\n');
+fprintf('        states_t(VecX& x) : ');
+states = temp_data.getStateNames(true);
+for i = 1:length(states)
+    if i ~= 1
+        fprintf(', ');
+    end
+    fprintf('%s(x.data()[%d])', states{i}, i-1);
+end
+fprintf(' {}\n\n');
+for i = 1:length(states)
+    fprintf('        real_type  &%s;\n', states{i});
+end
+fprintf('    } states;\n');
+}}};
+
+{{ fprintf('%s', temp_data.Name); }}::{{ fprintf('%s', temp_data.Name); }}() : 
+    param(), 
+    name({{ fprintf('"%s"', temp_data.Name); }}),
+    x(),
+    u(),
+    y(),
+    inputs(u),
+    outputs(y),
+    states(x)
+{
+{{ 
+    for i = 1:temp_data.getNumIn()
+        i_ = i - 1;
+        fprintf('    in_name[%d] = "%s";\n', i_, temp_data.getInName(i));
+    end
+}}
+{{ 
+    for i = 1:temp_data.getNumOut()
+        i_ = i - 1;
+        fprintf('    out_name[%d] = "%s";\n', i_, temp_data.getOutName(i));
+    end
+}}
+{{
+    states = temp_data.getStateNames(true);
+    for i = 1:length(states)        
+        fprintf('    state_name[%d] = "%s";\n', i-1, states{i});
+    end
+}}
+    x.setZero();
+    xdot.setZero();
+    u.setZero();
+    y.setZero();
+}
+
+void {{ fprintf('%s', temp_data.Name); }}::precalcConsts() {
+{{
+    % TODO: later the aux equations should be included in the length of used_pos_states
+    fprintf('    E.setZero();\n');
+    used_pos_states = temp_data.getUsedPositionalStates();
+    j = 1;
+    for i = 1:length(used_pos_states)
+        if used_pos_states(i)
+            fprintf('    E(%d, %d) = 1.0;\n', j-1, i-1);
+            j = j +1;
+        end
+    end
+}}    
+{{
+    [~, constants_list] = temp_data.isConstant([], 'cpp_ode1');
+    temp_persistent.constants_list = constants_list;
+    
+    df_II_dx_I = temp_data.replaceVars(temp_data.getK(true, true, true), 'cpp_ode1');
+    df_II_dx_I_const = arrayfun(@(x)temp_data.isConstant(x, '', temp_persistent.constants_list), df_II_dx_I);
+    printAssignC(4, 'df_II_dx_I', df_II_dx_I, 'matrix', df_II_dx_I_const)
+    temp_persistent.df_II_dx_I = df_II_dx_I;
+    temp_persistent.df_II_dx_I_const = df_II_dx_I_const;
+}}
+{{
+    df_II_dx_II = temp_data.replaceVars(temp_data.getC(true, true), 'cpp_ode1');
+    df_II_dx_II_const = arrayfun(@(x)temp_data.isConstant(x, '', temp_persistent.constants_list), df_II_dx_II);
+    printAssignC(4, 'df_II_dx_II', df_II_dx_II, 'matrix', df_II_dx_II_const)
+
+    temp_persistent.df_II_dx_II = df_II_dx_II;
+    temp_persistent.df_II_dx_II_const = df_II_dx_II_const;
+}}
+{{
+    df_II_dxdot_II = temp_data.replaceVars(temp_data.getM(true, true), 'cpp_ode1');
+    df_II_dxdot_II_const = arrayfun(@(x)temp_data.isConstant(x, '', temp_persistent.constants_list), df_II_dxdot_II);
+    printAssignC(4, 'df_II_dxdot_II', df_II_dxdot_II, 'matrix', df_II_dxdot_II_const)
+
+    temp_persistent.df_II_dxdot_II = df_II_dxdot_II;
+    temp_persistent.df_II_dxdot_II_const = df_II_dxdot_II_const;
+}}
+{{
+    df_II_du = temp_data.replaceVars(temp_data.getB(true), 'cpp_ode1');
+    df_II_du_const = arrayfun(@(x)temp_data.isConstant(x, '', temp_persistent.constants_list), df_II_du);
+    printAssignC(4, 'df_II_du', df_II_du, 'matrix', df_II_du_const)
+
+    temp_persistent.df_II_du = df_II_du;
+    temp_persistent.df_II_du_const = df_II_du_const;
+}}
+{{
+    dy_dxu = temp_data.replaceVars(temp_data.getCD(true, true, true), 'cpp_ode1');
+    dy_dx = dy_dxu(:, 1:temp_data.getNumStates(true));
+    dy_dx_const = arrayfun(@(x)temp_data.isConstant(x, '', temp_persistent.constants_list), dy_dx);
+    printAssignC(4, 'dy_dx', dy_dx, 'matrix', dy_dx_const)
+
+    dy_du = dy_dxu(:, temp_data.getNumStates(true)+1:end);
+    dy_du_const = arrayfun(@(x)temp_data.isConstant(x, '', temp_persistent.constants_list), dy_du);
+    printAssignC(4, 'dy_du', dy_du, 'matrix', dy_du_const)
+    
+    temp_persistent.dy_dx = dy_dx;
+    temp_persistent.dy_dx_const = dy_dx_const;
+    temp_persistent.dy_du = dy_du;
+    temp_persistent.dy_du_const = dy_du_const;
+}}
+{{
+    dy_dxdot = temp_data.replaceVars(temp_data.getF(true, true), 'cpp_ode1');
+    dy_dxdot_const = arrayfun(@(x)temp_data.isConstant(x, '', temp_persistent.constants_list), dy_dxdot);
+    printAssignC(4, 'dy_dxdot', dy_dxdot, 'matrix', dy_dxdot_const)
+
+    temp_persistent.dy_dxdot = dy_dxdot;
+    temp_persistent.dy_dxdot_const = dy_dxdot_const;
+}}}
+
+void {{ fprintf("%s", temp_data.Name); }}::evaluateResidual() {
+{{    
+    if temp_data.getNumExternals() > 0
+        fprintf('    calculateExternal();\n');
+    end
+}}
+{{
+        % Get the implicit ODE form F(x, xdot, u, t) = 0
+        eom = temp_data.replaceVars(temp_data.getEOM(true), 'cpp_ode1');
+        temp_persistent.eom = eom;
+        
+        % Optimize for code generation
+        [opt, tnames, tvalues] = temp_data.optimize(eom);
+        for i = 1:length(tnames)
+            printAssignC('    real_type ', char(tnames(i)), tvalues(i), 'scalar')
+        end
+        if ~isempty(tnames), fprintf("\n"); end
+        
+        % Output the assignment to f
+        printAssignC(4, 'f_II', opt{1}, 'vector_par')
+}}}
+
+void {{ fprintf("%s", temp_data.Name); }}::evaluateResidualAndJacobians() {
+{{    
+    if temp_data.getNumExternals() > 0
+        fprintf('    calculateExternalWithDeriv();\n');
+    end
+}}
+{{
+    % set constant entries to zero to hide them from the optimizer;
+    df_II_dxdot_II = temp_persistent.df_II_dxdot_II;
+    df_II_dxdot_II(temp_persistent.df_II_dxdot_II_const) = 0;
+
+    df_II_dx_II = temp_persistent.df_II_dx_II;
+    df_II_dx_II(temp_persistent.df_II_dx_II_const) = 0;
+
+    df_II_dx_I = temp_persistent.df_II_dx_I;
+    df_II_dx_I(temp_persistent.df_II_dx_I_const) = 0;
+    
+    [opt, tnames, tvalues] = temp_data.optimize(temp_persistent.eom, df_II_dxdot_II, df_II_dx_II, df_II_dx_I);
+    for i = 1:length(tnames)
+        printAssignC('    real_type ', char(tnames(i)), tvalues(i), 'scalar')
+    end
+    if ~isempty(tnames), fprintf("\n"); end
+        
+    printAssignC(4, 'df_II_dxdot_II', opt{2}, 'matrix', ~temp_persistent.df_II_dxdot_II_const);
+    if any(~temp_persistent.df_II_dxdot_II_const(:)), fprintf("\n"); end
+
+    printAssignC(4, 'df_II_dx_II', opt{3}, 'matrix', ~temp_persistent.df_II_dx_II_const);
+    if any(~temp_persistent.df_II_dx_II_const(:)), fprintf("\n"); end
+
+    printAssignC(4, 'df_II_dx_I', opt{4}, 'matrix', ~temp_persistent.df_II_dx_I_const);
+    if any(~temp_persistent.df_II_dx_I_const(:)), fprintf("\n"); end
+
+    printAssignC(4, 'f_II', opt{1}, 'vector_par')
+}}}
+
+void {{ fprintf("%s", temp_data.Name); }}::evaluateInputJacobian() {
+{{
+    % set constant entries to zero to hide them from the optimizer;
+    df_II_du = temp_persistent.df_II_du;
+    df_II_du(temp_persistent.df_II_du_const) = 0;
+    
+    [opt, tnames, tvalues] = temp_data.optimize(df_II_du);
+    for i = 1:length(tnames)
+        printAssignC('    real_type ', char(tnames(i)), tvalues(i), 'scalar')
+    end
+    if ~isempty(tnames), fprintf("\n"); end
+    
+    printAssignC(4, 'df_II_du', opt{1}, 'matrix', ~temp_persistent.df_II_du_const)
+}}}
+
+void {{ fprintf("%s", temp_data.Name); }}::evaluateOutput() {
+{{ 
+    y = temp_data.replaceVars(struct2array(temp_data.outputs).', 'cpp_ode1');
+    temp_persistent.y = y;
+    
+    [opt, tnames, tvalues] = temp_data.optimize(y);
+    for i = 1:length(tnames)
+        printAssignC('    real_type ', char(tnames(i)), tvalues(i), 'scalar')
+    end
+    if ~isempty(tnames), fprintf("\n"); end
+    
+    printAssignC(4, 'y', opt{1}, 'vector_par')
+}}}
+
+void {{ fprintf("%s", temp_data.Name); }}::evaluateOutputJacobian() {
+{{ 
+    % set constant entries to zero to hide them from the optimizer;
+    dy_dx = temp_persistent.dy_dx;
+    dy_dx(temp_persistent.dy_dx_const) = 0;
+    dy_du = temp_persistent.dy_du;
+    dy_du(temp_persistent.dy_du_const) = 0;
+    dy_dxdot = temp_persistent.dy_dxdot;
+    dy_dxdot(temp_persistent.dy_dxdot_const) = 0;
+    
+    [opt, tnames, tvalues] = temp_data.optimize(temp_persistent.y, dy_dx, dy_du, dy_dxdot);
+    for i = 1:length(tnames)
+        printAssignC('    real_type ', char(tnames(i)), tvalues(i), 'scalar')
+    end
+    if ~isempty(tnames), fprintf("\n"); end
+    
+    printAssignC(4, 'y', opt{1}, 'vector_par');
+    
+    if any(~temp_persistent.dy_dx_const(:)), fprintf("\n"); end
+    printAssignC(4, 'dy_dx', opt{2}, 'matrix', ~temp_persistent.dy_dx_const);
+    
+    if any(~temp_persistent.dy_du_const(:)), fprintf("\n"); end
+     printAssignC(4, 'dy_du', opt{3}, 'matrix', ~temp_persistent.dy_du_const);
+    
+    if any(~temp_persistent.dy_dxdot_const(:)), fprintf("\n"); end
+    printAssignC(4, 'dy_dxdot', opt{4}, 'matrix', ~temp_persistent.dy_dxdot_const)
+}}}
+
+{{ 
+% Optional: external headers
+if temp_data.getNumExternals() > 0
+    fprintf('#include "%s_Externals.hpp"\n', temp_data.Name);
+end
+}}
+#endif /* {{ fprintf('%s', upper([temp_data.Name '_ODE1_HPP'])); }} */
