@@ -184,6 +184,41 @@ end
 fprintf('    } states;\n');
 }}};
 
+{{ 
+fprintf('const %s::states_idx_type %s::states_idx= {', temp_data.Name, temp_data.Name);
+for i = 1:temp_data.getNumDOF()
+    if i ~= 1
+        fprintf(', ');
+    end
+    fprintf('%d', i-1);
+end
+for i = 1:temp_data.getNumAux()
+    if temp_data.getNumDOF() ~= 0
+        fprintf(', ');
+    end
+    fprintf('%d', i-1+temp_data.getNumDOF());
+end
+fprintf('};\n');
+
+fprintf('const %s::inputs_idx_type %s::inputs_idx= {', temp_data.Name, temp_data.Name);
+for i = 1:temp_data.getNumIn()
+    fprintf('%d', i-1);
+    if i ~= temp_data.getNumIn()
+        fprintf(', ');
+    end
+end
+fprintf('};\n');
+
+fprintf('const %s::outputs_idx_type %s::outputs_idx= {', temp_data.Name, temp_data.Name);
+for i = 1:temp_data.getNumOut()
+    fprintf('%d', i-1);
+    if i ~= temp_data.getNumOut()
+        fprintf(', ');
+    end
+end
+fprintf('};\n');
+}}
+
 {{ fprintf('%s', temp_data.Name); }}::{{ fprintf('%s', temp_data.Name); }}() : 
     param(), 
     name({{ fprintf('"%s"', temp_data.Name); }}),
