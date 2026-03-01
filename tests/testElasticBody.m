@@ -32,7 +32,7 @@ tower.addChild(top_mass)
 cart.applyForce([elastic_body_system.inputs.F_cart; 0; 0])
 elastic_body_system.addOutput('x', elastic_body_system.dof.x_cart)
 elastic_body_system.addOutput('x_tow', elastic_body_system.dof.q_tow)
-elastic_body_system.completeSetup;
+elastic_body_system.finishKinematics;
 
 eom = elastic_body_system.getEOM
 

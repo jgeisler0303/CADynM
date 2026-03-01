@@ -24,7 +24,7 @@ cart.addChild(pendulum)
 
 cart.applyForce([pendulum_model.inputs.F_cart; 0; 0])
 pendulum_model.addOutput('x', pendulum_model.dof.x_cart)
-pendulum_model.completeSetup;
+pendulum_model.finishKinematics;
 
 [~,~]=mkdir('generated');
 matlabTemplateEngine('generated/model_parameters.m', 'model_parameters.m.mte', pendulum_model)

@@ -16,6 +16,6 @@ testSystem.addChild(rotatingBody)
 
 rotatingBody.applyForce([testSystem.inputs.Fx; 0; 0])
 
-testSystem.completeSetup()
+testSystem.finishKinematics()
 % testSystem.eomDae('testConstraintRotation_DAE.m')
 Fz = testSystem.getConstraintForce({'Fc_x' 'Fc_y'})

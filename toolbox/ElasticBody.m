@@ -78,6 +78,7 @@ classdef ElasticBody  < Body
                 obj
                 Fe (:,1) 
             end
+            obj.system.checkKineticsNotFinished()
 
             obj.Fe_ext = obj.Fe_ext + Fe;
         end
@@ -105,7 +106,7 @@ classdef ElasticBody  < Body
                 iframe = length(obj.sid.frame);
             end
             
-            obj.system.checkSetupCompleted()
+            obj.system.checkKinematicsFinished()
 
             r_rel = obj.sid.frame(iframe).origin.evalTaylor(obj.ElasticDOF, obj.system.sym_eps);
             v_rel = diff(r_rel, obj.system.time);
@@ -114,9 +115,13 @@ classdef ElasticBody  < Body
             abs_accel = obj.getA0(r_rel, v_rel, a_rel);
         end
         
-        function prepareKinematics(obj)
+        function prepareKinematics(obj, kinematics_from_global)
+            arguments
+                obj
+                kinematics_from_global (1,1) logical = true
+            end
             obj.e_p= jacobian(obj.ElasticDOF, obj.system.q);
-            prepareKinematicsBase(obj)
+            prepareKinematicsBase(obj, kinematics_from_global)
         end
 
         function prepareForces(obj)
@@ -210,7 +215,7 @@ classdef ElasticBody  < Body
             % Constraint Forces can only be calculated once the whole
             % system loads were calculated. Therefore this is not possible
             % in prepareForces
-            obj.applyContrLoads();
+            obj.applyConstrLoads();
 
             obj.Fgen = - obj.v_p.' * (obj.F + obj.F_ext);
             obj.Fgen = obj.Fgen - obj.omega_p.' * (obj.M + obj.M_ext);            
@@ -218,7 +223,7 @@ classdef ElasticBody  < Body
             obj.Fgen = simplify(obj.Fgen);
         end
 
-        function applyContrLoads(obj)
+        function applyConstrLoads(obj)
             for i = 1:length(obj.children)
                 if ~isempty(obj.ConstrLoads)
                     constr_forces = obj.system.getConstraintForce(obj.ConstrLoads{i}, false);

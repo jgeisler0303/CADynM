@@ -13,7 +13,7 @@ testSystem.addChild(movingBody)
 
 movingBody.applyForce([testSystem.externals.F; 0; 0])
 
-testSystem.completeSetup()
+testSystem.finishKinematics()
 [~,~]=mkdir('generated');
 testSystem.eomDae('generated/testExternalLinear_DAE.m')
 eom = testSystem.getEOM()

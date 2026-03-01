@@ -27,8 +27,12 @@ classdef RigidBody  < Body
             end
         end
 
-        function prepareKinematics(obj)
-            prepareKinematicsBase(obj)
+        function prepareKinematics(obj, kinematics_from_global)
+            arguments
+                obj
+                kinematics_from_global (1,1) logical = true
+            end
+            prepareKinematicsBase(obj, kinematics_from_global)
         end
 
         function prepareForces(obj)

@@ -25,7 +25,8 @@ classdef MultiBodySystem  < handle
         aux_order struct = struct()             % order = max derivative of each state, currently only first order is supported
         aux_impl_ode                            % auxiliary implicit first order ode        
 
-        setupCompleted = false                  % set to true once model is finished an no further data can be added
+        kinematicsFinished = false                  % set to true once kinematics is finished
+        kineticsFinished = false                      % set to true once kinetics/eom is locked, no more forces may be added
 
         eom
         Fz                                      % cache for calculated constraint forces
@@ -81,7 +82,7 @@ classdef MultiBodySystem  < handle
                 return
             end
 
-            obj.checkSetupNotCompleted();
+            obj.checkKinematicsNotFinished();
 
             [obj.dof.(coordName), obj.dof.([coordName '_d']), obj.dof.([coordName '_dd'])] = createDerivatives(obj, coordName);
     
@@ -96,8 +97,6 @@ classdef MultiBodySystem  < handle
                 coordName { MultiBodySystem.mustBeNonemptyCharOrCell }
             end
 
-            obj.checkSetupNotCompleted();
-
             if iscell(coordName)
                 for i = 1:length(coordName)
                     obj.addConstraintCoordinate(coordName{i})
@@ -105,7 +104,7 @@ classdef MultiBodySystem  < handle
                 return
             end
     
-            obj.checkSetupNotCompleted();
+            obj.checkKinematicsNotFinished();
             [obj.doc.(coordName), obj.doc.([coordName '_d']), obj.doc.([coordName '_dd'])] = createDerivatives(obj, coordName);
     
             obj.z(end+1,1) = obj.doc.(coordName);
@@ -120,7 +119,6 @@ classdef MultiBodySystem  < handle
                 dims = []
                 value = []
             end
-            obj.checkSetupNotCompleted();
 
             if isstruct(paramName)
                 obj.params.setParamRefStruct(paramName)
@@ -180,7 +178,7 @@ classdef MultiBodySystem  < handle
                 return
             end
     
-            obj.checkSetupNotCompleted();
+            obj.checkKinematicsNotFinished();
             obj.checkName(inName)
     
             % Define symbolic variable dynamically using backend abstraction
@@ -199,6 +197,7 @@ classdef MultiBodySystem  < handle
                 expr
             end
             
+            obj.checkKineticsFinished();
             if isfield(obj.outputs, outName)
                 error('Output "%s" already defined.', outName)
             end
@@ -213,7 +212,7 @@ classdef MultiBodySystem  < handle
                 depends = []
             end
     
-            obj.checkSetupNotCompleted();            
+            obj.checkKinematicsNotFinished();            
             checkName(obj, extName)
     
             % Define symbolic variable dynamically using backend abstraction
@@ -241,7 +240,7 @@ classdef MultiBodySystem  < handle
                 error('Only first order auxilliary ODEs are currently supported.')
             end
 
-            obj.checkSetupNotCompleted();
+            obj.checkKinematicsNotFinished();
             obj.checkName(auxName)
     
             % Define symbolic variable dynamically using backend abstraction
@@ -255,7 +254,7 @@ classdef MultiBodySystem  < handle
 
         % Add auxilliary state by name
         function addAuxImplODE(obj, ode)
-            obj.checkSetupNotCompleted();
+            obj.checkKinematicsNotFinished();
             obj.aux_impl_ode(end+1) = ode;
         end
 
@@ -266,7 +265,7 @@ classdef MultiBodySystem  < handle
                 body (1,1) Body
             end
     
-            obj.checkSetupNotCompleted();
+            obj.checkKinematicsNotFinished();
             if isempty(body.Name)
                 name_in_use= true;
                 i= 1;
@@ -290,7 +289,7 @@ classdef MultiBodySystem  < handle
                 body (1,1) Body
             end
 
-            obj.checkSetupNotCompleted();
+            obj.checkKinematicsNotFinished();
             obj.addBody(body);
             
             body.parent= obj;
@@ -298,14 +297,46 @@ classdef MultiBodySystem  < handle
             obj.attached_bodies(end+1)= body;
         end
 
-        function completeSetup(obj)
-            obj.checkSetupNotCompleted()
-            obj.setupCompleted = true;
+        function finishKinematics(obj)
+            obj.checkKinematicsNotFinished()
+            obj.kinematicsFinished = true;
             
-            obj.prepareKinematics();
+            for i= 1:length(obj.attached_bodies)
+                obj.attached_bodies(i).T0= obj.attached_bodies(i).T;
+                obj.attached_bodies(i).prepareKinematics(MultiBodySystem.getsetKinematicsFromGlobal());
+            end
+        end
+
+        function finishKinetics(obj)
+            obj.checkKinematicsFinished()
+            if obj.kineticsFinished
+                error('Kinetics have already been locked. No further modifications allowed.')
+            end
+
+            % Needs to be set before call to getConstraintForce which is part of EOM calculation
+            obj.kineticsFinished = true;
+
+            % calculate constraint forces. Also part of the contract for finishKinetics
+            Fz_ = obj.sym(zeros(length(obj.z), 1));
+            for i= 1:length(obj.attached_bodies)
+                Fz_ = Fz_ + obj.attached_bodies(i).collectConstrForces;
+            end
+            
+            Fz_ = obj.simplify(Fz_);
+            obj.Fz = Fz_;
+            
+            % calculate EOM. Thats the contract for finishKinetics
+            eom_ = obj.sym(zeros(length(obj.q), 1));
+            for i= 1:length(obj.attached_bodies)
+                eom_ = eom_ + obj.attached_bodies(i).collectGenForces;
+            end
+
+            obj.eom = obj.simplify(eom_);
         end
 
         function removeUnusedParameters(obj)
+            obj.checkKineticsFinished();
+
             vars = [symvar(obj.eom) symvar(struct2array(obj.outputs)) symvar(obj.aux_impl_ode)];
             obj.params.removeUnused([string(vars) obj.external_params(:)']);
         end
@@ -688,18 +719,10 @@ classdef MultiBodySystem  < handle
                 obj 
                 with_aux (1,1) logical = false
             end
-            obj.checkSetupCompleted()
-            if ~isempty(obj.eom)
-                eom_ = obj.eom;
-            else
-                eom_ = obj.sym(zeros(length(obj.q), 1));
-                for i= 1:length(obj.attached_bodies)
-                    eom_ = eom_ + obj.attached_bodies(i).collectGenForces;
-                end
-    
-                eom_ = obj.simplify(eom_);
-                obj.eom = eom_;
-            end
+            obj.checkKineticsFinished()
+
+            eom_ = obj.eom;
+
             if with_aux && ~isempty(obj.aux_impl_ode)
                 % work-aroud for inconsistent MAMaS concatenation rules: pre allocate correct dimensions
                 eom__ = obj.sym(zeros(length(eom_)+length(obj.aux_impl_ode), 1));
@@ -710,8 +733,10 @@ classdef MultiBodySystem  < handle
         end
 
         function keep_dof_ = getUsedPositionalStates(obj)
+            obj.checkKineticsFinished()
+
             if isempty(obj.keep_positional_states)
-                eom_ = obj.getEOM();
+                eom_ = obj.eom;
                 outs= struct2array(obj.outputs);
 
                 keep_dof_ = true(length(obj.q), 1);
@@ -753,7 +778,8 @@ classdef MultiBodySystem  < handle
                 obj 
                 eliminate_unused (1,1) logical = false
             end
-            
+            obj.checkKineticsFinished()
+
             if eliminate_unused
                 keep_dof_ = obj.getUsedPositionalStates();
             else
@@ -786,20 +812,10 @@ classdef MultiBodySystem  < handle
                 name 
                 remove_eps = true;
             end
-            obj.checkSetupCompleted()
-            if ~isempty(obj.eom)
-                Fz_ = obj.Fz;
-            else
-                Fz_ = obj.sym(zeros(length(obj.z), 1));
-                for i= 1:length(obj.attached_bodies)
-                    Fz_ = Fz_ + obj.attached_bodies(i).collectConstrForces;
-                end
-                
-                Fz_ = obj.simplify(Fz_);
-                obj.Fz = Fz_;
-            end
+            obj.checkKineticsFinished()
 
-            Fz_ = Fz_(ismember(fieldnames(obj.doc_idx), name));
+            Fz_ = obj.Fz(ismember(fieldnames(obj.doc_idx), name));
+
             if remove_eps
                 Fz_ = obj.removeEps(Fz_);
             end
@@ -883,7 +899,7 @@ classdef MultiBodySystem  < handle
                 vars (:, 1) 
                 with_aux (1,1) logical = false
             end
-            obj.checkSetupCompleted()
+            obj.checkKineticsFinished()
 
             eom_ = obj.getEOM(with_aux);
             J= jacobian(eom_, vars);
@@ -897,6 +913,8 @@ classdef MultiBodySystem  < handle
                 with_aux (1,1) logical = false
                 aux_ode1 (1,1) logical = false % if true, aux odes are treated as second order for use in Newmark Beta, otherwise they are treated as first (or later higher order) for use in condensed RK1
             end
+            obj.checkKineticsFinished()
+
             vars = obj.getTimeDeriv(obj.q, 2);
             % currently only first order aux odes are allowed
             if with_aux
@@ -928,6 +946,8 @@ classdef MultiBodySystem  < handle
                 with_aux (1,1) logical = false
                 aux_ode1 (1,1) logical = false % if true, aux odes are treated as second order for use in Newmark Beta, otherwise they are treated as first (or later higher order) for use in condensed RK1
             end
+            obj.checkKineticsFinished()
+
             vars = obj.getTimeDeriv(obj.q, 1);
             if with_aux
                 if aux_ode1
@@ -948,6 +968,7 @@ classdef MultiBodySystem  < handle
                 aux_ode1 (1,1) logical = false % if true, aux odes are treated as second order for use in Newmark Beta, otherwise they are treated as first (or later higher order) for use in condensed RK1
                 eliminate_unused (1,1) logical = false
             end
+            obj.checkKineticsFinished()
 
             if eliminate_unused
                 keep_dof_ = obj.getUsedPositionalStates();
@@ -969,7 +990,7 @@ classdef MultiBodySystem  < handle
                 obj 
                 with_aux (1,1) logical = false
             end
-            obj.checkSetupCompleted()
+            obj.checkKineticsFinished()
 
             vars = struct2array(obj.inputs);
             B= jacobian(obj.getEOM(with_aux), vars);
@@ -983,8 +1004,7 @@ classdef MultiBodySystem  < handle
                 aux_ode1 (1,1) logical = false % if true, aux odes are treated as second order for use in Newmark Beta, otherwise they are treated as first (or later higher order) for use in condensed RK1
                 eliminate_unused (1,1) logical = false
             end
-
-            obj.checkSetupCompleted()
+            obj.checkKineticsFinished()
 
             if eliminate_unused
                 keep_dof_ = obj.getUsedPositionalStates();
@@ -1011,7 +1031,7 @@ classdef MultiBodySystem  < handle
                 with_aux (1,1) logical = false
                 aux_ode1 (1,1) logical = false % if true, aux odes are treated as second order for use in Newmark Beta, otherwise they are treated as first (or later higher order) for use in condensed RK1
             end
-            obj.checkSetupCompleted()
+            obj.checkKineticsFinished()
 
             vars = obj.getTimeDeriv(obj.q, 2);
             if with_aux
@@ -1092,29 +1112,32 @@ classdef MultiBodySystem  < handle
             end
         end
 
-        function checkSetupCompleted(obj)
-            if ~obj.setupCompleted
-                error('Model setup has not been completed. Please run completeSetup first.')
+        function checkKinematicsFinished(obj)
+            if ~obj.kinematicsFinished
+                error('Model kinematics has not been finished. Please run finishKinematics first.')
             end
         end
 
-        function checkSetupNotCompleted(obj)
-            if obj.setupCompleted
-                error('Model setup has been completed. No further data can be added.')
+        function checkKinematicsNotFinished(obj)
+            if obj.kinematicsFinished
+                error('Model kinematics has been finished. No further model structure can be added.')
+            end
+        end
 
+        function checkKineticsFinished(obj)
+            if ~obj.kineticsFinished
+                error('Kinetics have not been finished. Please run finishKinetics first.')
+            end
+        end
+
+        function checkKineticsNotFinished(obj)
+            if obj.kineticsFinished
+                error('Kinetics have been finished. No more forces or moments may be added.')
             end
         end
     end
 
     methods (Access = private)
-        % calculate kinematics
-        function prepareKinematics(obj)
-            for i= 1:length(obj.attached_bodies)
-                obj.attached_bodies(i).T0= obj.attached_bodies(i).T;
-                obj.attached_bodies(i).prepareKinematics;
-            end
-        end
-        
         function [x, x_d, x_dd] = createDerivatives(obj, var_name)
             var_name_d = [var_name '_d']; % This should be the sam as 'real_name' like in getQdName
             var_name_dd = [var_name '_dd'];
@@ -1300,6 +1323,26 @@ classdef MultiBodySystem  < handle
 
         function tf = isMSym()
             tf = strcmp(MultiBodySystem.getsetSymbolicBackend(), 'msym');
+        end
+
+        function k = getsetKinematicsFromGlobal(k)
+            persistent kinematicsFromGlobal
+            if nargin<1 || isempty(k)
+                if isempty(kinematicsFromGlobal)
+                    kinematicsFromGlobal = true;
+                end
+            else
+                kinematicsFromGlobal = k;
+            end
+            k = kinematicsFromGlobal;
+        end
+
+        function setKinematicsFromGlobal()
+            MultiBodySystem.getsetKinematicsFromGlobal(true);
+        end
+
+        function setKinematicsFromLocal()
+            MultiBodySystem.getsetKinematicsFromGlobal(false);
         end
     end
 

@@ -111,7 +111,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 v_rel (3, 1) {Body.mustBeNumericOrSym} 
                 a_rel (3, 1) {Body.mustBeNumericOrSym} 
             end
-            obj.system.checkSetupCompleted()
+            obj.system.checkKinematicsFinished()
 
             r_abs = obj.T0(1:3, 1:3) * r_rel;
             v_abs = obj.T0(1:3, 1:3) * v_rel;
@@ -120,21 +120,33 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             abs_accel = obj.system.simplify(obj.a0 + crossmat(obj.alpha0)*r_abs + crossmat(obj.omega0)*(crossmat(obj.omega0)*r_abs) + 2*crossmat(obj.omega0)*v_abs + a_abs);
         end
 
-        % calculate kinematics
-        function prepareKinematicsBase(obj)
-            obj.v0= diff(obj.T0(1:3, 4), obj.system.time);
-            obj.v0_z = obj.v0;
-            % store with and remove movement inconstraint directions
-            obj.v0 = obj.system.removeDOC(obj.v0);
+        % calculate kinematics - dispatcher method
+        function prepareKinematicsBase(obj, kinematics_from_global)
+            if kinematics_from_global
+                obj.prepareKinematicsFromGlobal();
+            else
+                obj.prepareKinematicsFromLocal();
+            end
+
+            for i= 1:length(obj.children)
+                obj.children(i).T0= obj.T0 * obj.children(i).T;
+                obj.children(i).prepareKinematics(kinematics_from_global);
+            end
+
+            obj.T0= obj.system.removeDOC(obj.T0);
+        end
+
+        % calculate kinematics from global frame
+        function prepareKinematicsFromGlobal(obj)
+            obj.v0_z= obj.system.simplify(obj.system.removeEps(diff(obj.T0(1:3, 4), obj.system.time), true));
+            obj.v0 = obj.system.removeDOC(obj.v0_z);
 
             obj.a0= diff(obj.v0, obj.system.time);
 
             w_skew= obj.system.simplify(diff(obj.T0(1:3, 1:3), obj.system.time)*obj.T0(1:3, 1:3).');
-            obj.omega0= [(w_skew(3, 2)-w_skew(2, 3))/obj.system.sym(2); (w_skew(1, 3)-w_skew(3, 1))/obj.system.sym(2); (w_skew(2, 1)-w_skew(1, 2))/obj.system.sym(2)];
-            obj.omega0= obj.system.simplify(obj.system.removeEps(obj.omega0, true));
-            % store with and remove movement inconstraint directions
-            obj.omega0_z= obj.omega0;
-            obj.omega0 = obj.system.removeDOC(obj.omega0);
+            obj.omega0_z= [(w_skew(3, 2)-w_skew(2, 3))/obj.system.sym(2); (w_skew(1, 3)-w_skew(3, 1))/obj.system.sym(2); (w_skew(2, 1)-w_skew(1, 2))/obj.system.sym(2)];
+            obj.omega0_z= obj.system.simplify(obj.system.removeEps(obj.omega0_z, true));
+            obj.omega0 = obj.system.removeDOC(obj.omega0_z);
 
             obj.alpha0= diff(obj.omega0, obj.system.time);
 
@@ -148,16 +160,84 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
 
             obj.omegaz_p= obj.system.keepEps(jacobian(obj.omega0_z, diff(obj.system.z, obj.system.time)));
             obj.omegaz_p= obj.system.simplify(obj.system.removeDOC(obj.omegaz_p));
-
-            for i= 1:length(obj.children)
-                obj.children(i).T0= obj.T0 * obj.children(i).T;
-                obj.children(i).prepareKinematics;
-            end
-
-            obj.T0= obj.system.removeDOC(obj.T0);
         end
 
-        function prepareForces(obj)
+        % calculate kinematics from local frame
+        function prepareKinematicsFromLocal(obj)
+            % Calculate local kinematics first
+            % Velocity and acceleration from local transformation
+            v_local_z = diff(obj.T(1:3, 4), obj.system.time);
+            v_local = obj.system.removeDOC(v_local_z);
+            a_local = diff(v_local, obj.system.time);
+            
+            % Angular velocity from local rotation matrix
+            w_skew_local = obj.system.simplify(diff(obj.T(1:3, 1:3), obj.system.time) * obj.T(1:3, 1:3).');
+            omega_local_z = [(w_skew_local(3, 2)-w_skew_local(2, 3))/obj.system.sym(2); ...
+                          (w_skew_local(1, 3)-w_skew_local(3, 1))/obj.system.sym(2); ...
+                          (w_skew_local(2, 1)-w_skew_local(1, 2))/obj.system.sym(2)];
+            omega_local_z = obj.system.simplify(obj.system.removeEps(omega_local_z, true));
+            omega_local = obj.system.removeDOC(omega_local_z);
+            alpha_local = diff(omega_local, obj.system.time);
+            
+            % Partial velocities
+            v_local_p = jacobian(v_local, diff(obj.system.q, obj.system.time));
+            omega_local_p = jacobian(omega_local, diff(obj.system.q, obj.system.time));
+
+            v_local_z_p = obj.system.removeDOC(jacobian(v_local_z, diff(obj.system.z, obj.system.time)));
+            omega_local_z_p= obj.system.removeDOC(jacobian(omega_local_z, diff(obj.system.z, obj.system.time)));
+
+            % omega0_z and v0_z are not needed, so leave them out
+            if isa(obj.parent, 'MultiBodySystem')
+                % If parent is MultiBodySystem = inertial frame, local and global kinematics are the same
+                obj.v0 = v_local;
+                obj.a0 = a_local;
+                obj.omega0 = omega_local;
+                obj.alpha0 = alpha_local;
+
+                obj.v_p = v_local_p;
+                obj.omega_p = omega_local_p;
+                obj.vz_p = v_local_z_p;
+                obj.omegaz_p = omega_local_z_p;
+            else
+                rotationToGlobal = obj.system.removeDOC(obj.parent.T0(1:3, 1:3));
+                r_rel = rotationToGlobal * obj.system.removeDOC(obj.T(1:3, 4));
+                v_rel = rotationToGlobal * v_local;
+                omega_rel = rotationToGlobal * omega_local;
+                a_rel = rotationToGlobal * a_local;
+                alpha_rel = rotationToGlobal * alpha_local;
+
+                obj.v0 = obj.parent.v0 + crossmat(obj.parent.omega0) * r_rel + v_rel;
+                obj.a0 = obj.parent.a0 + crossmat(obj.parent.alpha0) * r_rel + crossmat(obj.parent.omega0) * (crossmat(obj.parent.omega0) * r_rel) + 2 * crossmat(obj.parent.omega0) * v_rel + a_rel;
+                obj.omega0 = obj.parent.omega0 + omega_rel;
+                obj.alpha0 = obj.parent.alpha0 + crossmat(obj.parent.omega0) * omega_rel + alpha_rel;
+
+                obj.v_p = obj.system.sym(zeros(3, length(obj.system.q)));
+                obj.omega_p = obj.system.sym(zeros(3, length(obj.system.q)));
+                for i= 1:length(obj.system.q)
+                    v_rel_p = rotationToGlobal * v_local_p(:, i);
+                    obj.v_p(:, i) = obj.parent.v_p(:, i) + crossmat(obj.parent.omega_p(:, i)) * r_rel + v_rel_p;
+
+                    omega_rel_p = rotationToGlobal * omega_local_p(:, i);
+                    obj.omega_p(:, i) = obj.parent.omega_p(:, i) + omega_rel_p;
+                end
+                obj.vz_p = obj.system.sym(zeros(3, length(obj.system.z)));
+                obj.omegaz_p = obj.system.sym(zeros(3, length(obj.system.z)));
+                for i= 1:length(obj.system.z)
+                    v_rel_z_p = rotationToGlobal * v_local_z_p(:, i);
+                    obj.vz_p(:, i) = obj.parent.vz_p(:, i) + crossmat(obj.parent.omegaz_p(:, i)) * r_rel + v_rel_z_p;
+
+                    omega_rel_z_p = rotationToGlobal * omega_local_z_p(:, i);
+                    obj.omegaz_p(:, i) = obj.parent.omegaz_p(:, i) + omega_rel_z_p;
+                end
+            end
+            obj.v_p = obj.system.simplify(obj.system.removeEps(obj.v_p));
+            obj.omega_p = obj.system.simplify(obj.system.removeEps(obj.omega_p));
+            obj.vz_p = obj.system.simplify(obj.system.removeEps(obj.vz_p));
+            obj.omegaz_p = obj.system.simplify(obj.system.removeEps(obj.omegaz_p));
+        end
+
+        function prepareForces(~)
+            % virtual method implemented by subclasses
         end
 
         function calcGenForce(obj)
@@ -206,6 +286,8 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 obj
                 F (3,1) 
             end
+            obj.system.checkKineticsNotFinished();
+
             obj.F_ext = obj.F_ext + F;
         end
 
@@ -215,6 +297,8 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 obj
                 M (3,1) 
             end
+            obj.system.checkKineticsNotFinished();
+
             obj.M_ext = obj.M_ext + M;
         end
 
@@ -226,6 +310,8 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 F (3,1) 
                 b2 (1,1) Body
             end
+            obj.system.checkKineticsNotFinished();
+
             obj.applyForce(F)
             b2.applyForce(-F)
         end
@@ -238,6 +324,8 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 M (3,1) 
                 b2 (1,1) Body
             end
+            obj.system.checkKineticsNotFinished();
+
             obj.applyMoment(M)
             b2.applyMoment(-M)
         end
@@ -251,7 +339,8 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 F (3,1)          % force in body local coordinates
             end
             % make sure T0 is already available
-            obj.system.checkSetupCompleted()
+            obj.system.checkKinematicsFinished()
+            obj.system.checkKineticsNotFinished()
 
             Fin0 = obj.T0(1:3, 1:3) * F;
             r0 = obj.T0(1:3, 1:3) * r;
@@ -266,6 +355,8 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                 r0 (3,1)          % position relative to center of mass or reference system in global coordinates
                 F0 (3,1)          % force in global coordinates
             end
+            obj.system.checkKineticsNotFinished()
+
             obj.applyForce(F0)
             obj.applyMoment(crossmat(r0)*F0)
         end
