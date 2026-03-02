@@ -134,6 +134,14 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             end
 
             obj.T0= obj.system.removeDOC(obj.T0);
+
+            % eps may only be removed after all children have been processed, otherwise recursive propagation is not correct.
+            if ~kinematics_from_global
+                obj.v_p = obj.system.simplify(obj.system.removeEps(obj.v_p));
+                obj.omega_p = obj.system.simplify(obj.system.removeEps(obj.omega_p));
+                obj.vz_p = obj.system.simplify(obj.system.removeEps(obj.vz_p));
+                obj.omegaz_p = obj.system.simplify(obj.system.removeEps(obj.omegaz_p));
+            end
         end
 
         % calculate kinematics from global frame
@@ -167,7 +175,7 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
             % Calculate local kinematics first
             % Velocity and acceleration from local transformation
             v_local_z = diff(obj.T(1:3, 4), obj.system.time);
-            v_local = obj.system.removeDOC(v_local_z);
+            v_local = obj.system.removeDOC(obj.system.removeEps(v_local_z, true));
             a_local = diff(v_local, obj.system.time);
             
             % Angular velocity from local rotation matrix
@@ -230,10 +238,6 @@ classdef Body  < handle & matlab.mixin.Heterogeneous
                     obj.omegaz_p(:, i) = obj.parent.omegaz_p(:, i) + omega_rel_z_p;
                 end
             end
-            obj.v_p = obj.system.simplify(obj.system.removeEps(obj.v_p));
-            obj.omega_p = obj.system.simplify(obj.system.removeEps(obj.omega_p));
-            obj.vz_p = obj.system.simplify(obj.system.removeEps(obj.vz_p));
-            obj.omegaz_p = obj.system.simplify(obj.system.removeEps(obj.omegaz_p));
         end
 
         function prepareForces(~)

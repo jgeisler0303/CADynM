@@ -1,4 +1,4 @@
-{{ fprintf('/* Multibody system: "%s", generated using backend %s */', temp_data.Name, temp_data.getsetSymbolicBackend); }}
+{{ fprintf('/* Multibody system: "%s", generated using backend %s, kinematics from global = %d */', temp_data.Name, temp_data.getsetSymbolicBackend, temp_data.getsetKinematicsFromGlobal()); }}
 
 #ifndef {{ fprintf('%s', upper([temp_data.Name '_ODE1_HPP'])); }}
 #define {{ fprintf('%s', upper([temp_data.Name '_ODE1_HPP'])); }}
@@ -186,17 +186,11 @@ fprintf('    } states;\n');
 
 {{ 
 fprintf('const %s::states_idx_type %s::states_idx= {', temp_data.Name, temp_data.Name);
-for i = 1:temp_data.getNumDOF()
+for i = 1:temp_data.getNumStates(true)
     if i ~= 1
         fprintf(', ');
     end
     fprintf('%d', i-1);
-end
-for i = 1:temp_data.getNumAux()
-    if temp_data.getNumDOF() ~= 0
-        fprintf(', ');
-    end
-    fprintf('%d', i-1+temp_data.getNumDOF());
 end
 fprintf('};\n');
 

@@ -1348,7 +1348,7 @@ classdef MultiBodySystem  < handle
 
     methods (Static, Access = private)
         function expr = removeHigherOrderTermsSym(expr, monom, keep_symbols)
-            for i = 1:length(expr)
+            for i = 1:numel(expr)
                 c = coeffs(expr(i), monom, 'All');
                 switch length(c)
                     case {0,1} % empty or no terms with monom, or only first order terms: keep them
