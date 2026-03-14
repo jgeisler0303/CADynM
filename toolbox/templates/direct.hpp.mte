@@ -259,9 +259,7 @@ void {{ fprintf("%s", temp_data.Name); }}::precalcConsts() {
     printAssignC(4, 'B', B, 'matrix', const_selector)
     fprintf("\n");
 
-    CD = temp_data.replaceVars(temp_data.getCD(true), 'cpp');
-    printAssignC(4, 'CD', CD, 'matrix', const_selector)
-    fprintf("\n");
+    % CD must not be set here. It must be completely written in calcCDF because NewmarkBeta partially overwrites it
     
     F = temp_data.replaceVars(temp_data.getF(true), 'cpp');
     printAssignC(4, 'F', F, 'matrix', const_selector)
@@ -381,11 +379,6 @@ void {{ fprintf("%s", temp_data.Name); }}::calcCDF() {
     F = temp_data.replaceVars(temp_data.getF(true), 'cpp');
     
     for i = 1:temp_data.getNumOut()
-        for j = 1:(2*temp_data.getNumDOF()+2*temp_data.getNumAux()+temp_data.getNumIn())
-            if ~not_const_selector(CD(i, j))
-                CD(i, j) = 0; % constant elements dont need to be optimized
-            end
-        end
         for j = 1:(temp_data.getNumDOF()+temp_data.getNumAux())
             if ~not_const_selector(F(i, j))
                 F(i, j) = 0; % constant elements dont need to be optimized
@@ -400,9 +393,12 @@ void {{ fprintf("%s", temp_data.Name); }}::calcCDF() {
     if ~isempty(tnames), fprintf("\n"); end
     
     n = printAssignC(4, 'y', opt{1}, 'vector_par');
+
     if n>0, fprintf("\n"); end
-    n = printAssignC(4, 'CD', opt{2}, 'matrix', not_const_selector);
-    if n>0, fprintf("\n"); end
+    fprintf("    CD.setZero();\n"); 
+    n = printAssignC(4, 'CD', opt{2}, 'matrix', @(e)e~=0);
+
+    fprintf("\n");
     printAssignC(4, 'F', opt{3}, 'matrix', not_const_selector)
 }}}
 
