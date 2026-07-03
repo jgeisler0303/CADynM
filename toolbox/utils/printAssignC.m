@@ -34,6 +34,8 @@ for i = 1:m
                 index = sprintf('(%d)', i-1+(j-1)*m);
             case 'matrix'
                 index = sprintf('(%d, %d)', i-1, j-1);
+            case 'matlab'
+                index = sprintf('(%d, %d)', i, j);
             otherwise
                 error('Unknown indexing "%s"', type)
         end

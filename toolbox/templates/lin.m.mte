@@ -1,0 +1,67 @@
+{{ fprintf('%% Multibody system: "%s", generated using backend %s, kinematics from global = %d', temp_data.Name, temp_data.getsetSymbolicBackend, temp_data.getsetKinematicsFromGlobal()); }}
+
+nx = {{ fprintf("%d", temp_data.getNumStates(true)); }};
+nxdot = {{ fprintf("%d", temp_data.getNumDOF + temp_data.getNumAux()); }};
+nu = {{ fprintf("%d", temp_data.getNumIn); }};
+ny = {{ fprintf("%d", temp_data.getNumOut); }};
+
+{{
+states = temp_data.getStateNames(true);
+for i = 1:length(states)
+    fprintf("%s_idx= %d;\n", states{i}, i);
+end
+
+}}
+{{ 
+for i = 1:temp_data.getNumIn
+    fprintf("in_%s_idx= %d;\n", temp_data.getInName(i), i);
+end
+}}
+{{ 
+for i = 1:temp_data.getNumOut
+    fprintf("out_%s_idx= %d;\n", temp_data.getOutName(i), i);
+end
+}}
+{{
+    M = temp_data.replaceVars(temp_data.getM(true, true), 'matlab_ode1');
+    used_pos_states = temp_data.getUsedPositionalStates();
+
+    E = blkdiag(eye(length(used_pos_states)), M);
+    fprintf('E = zeros(%d);\n', temp_data.getNumStates(true));
+    printAssignC(0, 'E', E, 'matlab', @(x)x~=0);
+    
+    temp_persistent.used_pos_states = used_pos_states;
+}}
+{{
+    K = temp_data.replaceVars(temp_data.getK(true, true, true), 'matlab_ode1');
+    C = temp_data.replaceVars(temp_data.getC(true, true), 'matlab_ode1');
+    A_ = zeros(length(temp_persistent.used_pos_states), temp_data.getNumStates(true));
+    j = 1;
+    for i = 1:length(temp_persistent.used_pos_states)
+        if temp_persistent.used_pos_states(i)
+            A_(i, length(temp_persistent.used_pos_states) + j) = 1;
+            j = j + 1;
+        end
+    end
+    
+    A = [A_; -K -C];
+    fprintf('A = zeros(%d);\n', temp_data.getNumStates(true));
+    printAssignC(0, 'A', A, 'matlab', @(x)x~=0);
+}}
+{{
+    B = temp_data.replaceVars(temp_data.getB(true), 'matlab_ode1');
+    B_ = [zeros(length(temp_persistent.used_pos_states), size(B, 2)); -B];
+    
+    fprintf('B = zeros(%d, %d);\n', temp_data.getNumStates(true), size(B, 2));
+    printAssignC(0, 'B', B_, 'matlab', @(x)x~=0);
+}}
+{{
+    CD = temp_data.replaceVars(temp_data.getCD(true, true, true), 'matlab_ode1');
+
+    fprintf('C = zeros(%d, %d);\n', size(CD, 1), temp_data.getNumStates(true));
+    printAssignC(0, 'C', CD(:, 1:temp_data.getNumStates(true)), 'matlab', @(x)x~=0);
+    fprintf('\n');
+    
+    fprintf('D = zeros(%d, %d);\n', size(CD, 1), size(CD, 2)-temp_data.getNumStates(true));
+    printAssignC(0, 'D', CD(:, temp_data.getNumStates(true)+1:end), 'matlab', @(x)x~=0);
+}}

@@ -228,7 +228,7 @@ classdef MultiBodySystem  < handle
             arguments
                 obj
                 auxName { MultiBodySystem.mustBeNonemptyCharOrCell }
-                order (:,1) double = 1
+                order (:,1) double = ones(length(auxName), 1);
             end
             if iscell(auxName)
                 for i = 1:length(auxName)
@@ -440,6 +440,13 @@ classdef MultiBodySystem  < handle
                     n = sprintfc('q_%d', i)';
                 case 'cpp'
                     n = sprintfc('q_IDX%dXDI_', i-1)';
+                case 'matlab_ode1'
+                    % we must assume the state vector is composed like
+                    % [q(keep_positional_states), qd, aux]
+                    keep_q = obj.getUsedPositionalStates();
+                    keep_q_idx = cumsum(keep_q);
+                    keep_q_idx(~keep_q) = nan;
+                    n = sprintfc('x_IDX%dXDI_', keep_q_idx(i));
                 case 'cpp_ode1'
                     % we must assume the state vector is composed like
                     % [q(keep_positional_states), qd, aux]
@@ -472,6 +479,10 @@ classdef MultiBodySystem  < handle
                     n = sprintfc('qd_%d', i)';
                 case 'cpp'
                     n = sprintfc('qd_IDX%dXDI_', i-1)';
+                case 'matlab_ode1'
+                    % we must assume the state vector is composed like
+                    % [q(keep_positional_states), qd, aux]
+                    n = sprintfc('x_IDX%dXDI_', i+sum(obj.getUsedPositionalStates()))';
                 case 'cpp_ode1'
                     % we must assume the state vector is composed like
                     % [q(keep_positional_states), qd, aux]
@@ -501,6 +512,8 @@ classdef MultiBodySystem  < handle
                     n = sprintfc('qdd_%d', i)';
                 case 'cpp'
                     n = sprintfc('qdd_IDX%dXDI_', i-1)';
+                case 'matlab_ode1'
+                    n = sprintfc('qdd_IDX%dXDI_', i)';
                 case 'cpp_ode1'
                     n = sprintfc('xdot_IDX%dXDI_', i-1)';
             end
@@ -547,6 +560,16 @@ classdef MultiBodySystem  < handle
                     n = sprintfc('%s_%d', basename, i)';
                 case 'cpp'
                     n = sprintfc(['q' deriv_str '_IDX%dXDI_'], i-1+obj.getNumDOF)';
+                case 'matlab_ode1'
+                    % we must assume the state vector is composed like
+                    % [q(keep_positional_states), qd, aux]
+                    if deriv==0
+                        n = sprintfc('x_IDX%dXDI_', i+sum(obj.getUsedPositionalStates())+length(obj.q))';
+                    elseif deriv==1
+                        n = sprintfc('xdot_IDX%dXDI_', i+length(obj.q))';
+                    else
+                        n = sprintfc('xdot_IDX%dXDI_', i+nan)';
+                    end
                 case 'cpp_ode1'
                     % we must assume the state vector is composed like
                     % [q(keep_positional_states), qd, aux]
@@ -619,6 +642,8 @@ classdef MultiBodySystem  < handle
                     n = fn(i);
                 case 'numbered'
                     n = sprintfc('in_%d', i)';
+                case 'matlab_ode1'
+                    n = sprintfc('u_IDX%dXDI_', i)';
                 case {'cpp', 'cpp_ode1'}
                     n = sprintfc('u_IDX%dXDI_', i-1)';
             end
@@ -647,7 +672,7 @@ classdef MultiBodySystem  < handle
                     n = fn(i)';
                 case 'numbered'
                     n = sprintfc('p_%d', i)';
-                case {'cpp', 'cpp_ode1'}
+                case {'cpp', 'cpp_ode1', 'matlab_ode1'}
                     fn = obj.params.getParamNames();
                     n = strcat('PSTRUCT_', fn(i))';
             end
@@ -671,7 +696,7 @@ classdef MultiBodySystem  < handle
                     n = fn(i);
                 case 'numbered'
                     n = sprintfc('ext_%d', i)';
-                case {'cpp', 'cpp_ode1'}
+                case {'cpp', 'cpp_ode1', 'matlab_ode1'}
                     fn = fieldnames(obj.externals);
                     n = fn(i);
             end
@@ -841,7 +866,7 @@ classdef MultiBodySystem  < handle
             vars.auxdd = cellfun(@(n)obj.sym(n), obj.getAuxName([], 2, naming));
             
             % TODO: handle arbitrary order aux states
-            e = subs(e, obj.getTimeDeriv(struct2array(obj.aux_state), 1), vars.auxd);
+            e = subs(e, obj.getTimeDeriv(struct2array(obj.aux_state).', 1), vars.auxd);
             e = subs(e, struct2array(obj.aux_state).', vars.aux);
         end
 
@@ -873,8 +898,11 @@ classdef MultiBodySystem  < handle
             
             vars.ext = ext_vars;
             vars.ext_d = ext_d;
-
-            vars.u = cellfun(@(n)obj.sym(n), obj.getInName([], naming));
+            inNames = obj.getInName([], naming);
+            if ~iscell(inNames)
+                inNames = {inNames};
+            end
+            vars.u = cellfun(@(n)obj.sym(n), inNames);
             vars.p = cellfun(@(n)obj.sym(n), obj.getParamName([], naming));
 
             e = subs(e, struct2array(obj.inputs), vars.u.');
@@ -919,7 +947,7 @@ classdef MultiBodySystem  < handle
             % currently only first order aux odes are allowed
             if with_aux
                 if aux_ode1
-                    vars = [vars; obj.getTimeDeriv(struct2array(obj.aux_state), 1)];
+                    vars = [vars; obj.getTimeDeriv(struct2array(obj.aux_state).', 1)];
                 else
                     aux_names = fieldnames(obj.aux_order);
                     aux_state_dd = cell(length(aux_names), 1);
